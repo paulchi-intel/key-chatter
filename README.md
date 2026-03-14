@@ -1,6 +1,6 @@
 # Key Chatter
 
-Chrome extension side panel for ExpertGPT.
+Chrome extension side panel using ExpertGPT API key.
 
 ## GitHub Description
 
@@ -14,7 +14,7 @@ Key Chatter is a Chrome side panel extension for ExpertGPT with webpage/clipboar
 - **Dual model sources** — OpenAI models from `/v1/models` and Anthropic models from `/anthropic/v1/models`
 - **Grouped model dropdown** — selector groups are shown as `--- OpenAI ---` and `--- Anthropic ---`
 - **Anthropic restrictions** — models that are currently restricted are shown disabled (gray) in the Anthropic section; `claude-haiku-4-5*` stays selectable
-- **Header controls** — 清除 / 載入網頁 / 載入剪貼簿 / model dropdown / language selector (繁/簡/En)
+- **Header controls** — Clear / Load Page / Load Clipboard / model dropdown / language selector (繁/簡/En)
 - **Quick Questions** — appears after loading page/clipboard content; one-click summary templates
 - **Saved Prompts** — manage reusable prompt snippets, accessible from the chat panel
 - **i18n** — full UI in Traditional Chinese, Simplified Chinese, and English
@@ -22,7 +22,7 @@ Key Chatter is a Chrome side panel extension for ExpertGPT with webpage/clipboar
 
 ## API Key
 
-No default key is bundled. On first launch you will be prompted to enter a `pak_...` key.  
+No default key is bundled. On first launch you will be prompted to enter a `pak_...` key.
 To change the key later, click **🔑 Key Chatter** in the header.
 
 ## How to use
@@ -30,7 +30,7 @@ To change the key later, click **🔑 Key Chatter** in the header.
 1. Open the side panel.
 2. Enter your `pak_...` API key when prompted (first launch only).
 3. Select a model from the header dropdown.
-4. Optionally click **載入網頁** or **載入剪貼簿** to add context.
+4. Optionally click **Load Page** or **Load Clipboard** to add context.
 5. Use **Quick Questions** for one-click summaries after loading content.
 6. Use **Saved Prompts** to store and reuse common prompts.
 7. Ask questions normally in the chat box.
