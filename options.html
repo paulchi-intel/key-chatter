@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Key Chatter - Options</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f3f4f6;
+      padding: 20px;
+      color: #1f2937;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .section {
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 12px;
+    }
+
+    .info-box {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+      border-left: 4px solid #3b82f6;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #374151;
+      line-height: 1.6;
+    }
+
+    .features {
+      list-style: none;
+      padding: 0;
+    }
+
+    .features li {
+      padding: 8px 0;
+      color: #374151;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .features li::before {
+      content: "✓ ";
+      color: #3b82f6;
+      font-weight: 600;
+      margin-right: 8px;
+    }
+
+    .note {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #78350f;
+      line-height: 1.6;
+    }
+
+    code {
+      background: #e5e7eb;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #111827;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>💬 Key Chatter</h1>
+    <p class="subtitle">ExpertGPT side panel with API key switching, model selection, chat with webpage context, and personal quota check.</p>
+
+    <div class="section">
+      <div class="section-title">Core Capabilities</div>
+      <ul class="features">
+        <li>Topbar actions for <strong>Clear Chat</strong>, <strong>Load Page</strong>, and <strong>Load Clipboard</strong></li>
+        <li>Language dropdown (Traditional Chinese, Simplified Chinese, English)</li>
+        <li>Quick Questions templates and Saved Prompts manager</li>
+        <li>API key management and model switching in Settings</li>
+        <li>Personal quota check from <code>/v1/quota</code></li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <div class="section-title">How To Use</div>
+      <ol style="padding-left: 20px; color: #374151; font-size: 14px; line-height: 1.8;">
+        <li>Open the side panel and click <strong>Load Page</strong> or <strong>Load Clipboard</strong></li>
+        <li>Use quick templates or type your own question and click <strong>Send</strong></li>
+        <li>Switch to <strong>Settings</strong> to manage API key/model and check quota</li>
+        <li>Use <strong>Saved Prompts</strong> to reuse frequently used requests</li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <div class="info-box">
+        API keys must start with <code>pak_</code>. If model/quota loading fails, verify key validity and network access.
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="note">
+        <strong>Note:</strong> Existing key/model/chat states are stored in <code>chrome.storage.local</code>.
+      </div>
+    </div>
+  </div>
+</body>
+</html>
