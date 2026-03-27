@@ -11,7 +11,7 @@ const STORAGE_KEYS = {
 
 const DEFAULT_MODEL = "gpt-4.1-mini";
 const RUNTIME_MESSAGE_TIMEOUT_MS = 20000;
-const ALLOWED_ANTHROPIC_MODEL_PREFIXES = ["claude-haiku-4-5"];
+const ALLOWED_ANTHROPIC_MODEL_PREFIXES = [];
 
 const TRANSLATIONS = {
   "zh-TW": {
@@ -426,11 +426,8 @@ function renderMessages() {
 }
 
 function isAnthropicModelRestricted(model) {
-  if (!state.anthropicModels.includes(model)) {
-    return false;
-  }
-
-  return !ALLOWED_ANTHROPIC_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+  // All Anthropic models are now available
+  return false;
 }
 
 function getSelectableModels() {
