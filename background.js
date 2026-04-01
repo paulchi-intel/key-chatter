@@ -124,13 +124,14 @@ async function callExpertGPT(messages, language, apiKey, model) {
 
   if (isAnthropicModel(selectedModel)) {
     const anthropicBase = isGnaiKey(apiKey) ? GNAI_ANTHROPIC_BASE_URL : ANTHROPIC_BASE_URL;
+    const anthropicPath = isGnaiKey(apiKey) ? "/v1/messages" : "/messages";
     const body = {
       model: selectedModel,
       system: systemPrompt,
       messages: messages,
       max_tokens: 1200
     };
-    const data = await fetchJson(anthropicBase, "/v1/messages", apiKey, {
+    const data = await fetchJson(anthropicBase, anthropicPath, apiKey, {
       method: "POST",
       body: JSON.stringify(body)
     });
