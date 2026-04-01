@@ -44,7 +44,7 @@ const TRANSLATIONS = {
     "empty-prompts": "還沒有常用提示詞，請在下方新增",
     "empty-saved-prompts": "點擊「管理」來新增常用提示詞",
     "new-prompt-placeholder": "輸入新的常用提示詞...",
-    "error-api-key-prefix": "API key 必須以 pak_ 開頭",
+    "error-api-key-prefix": "API key 格式無效，請輸入 pak_ 開頭（ExpertGPT）或 GNAI Key",
     "error-no-tab": "找不到當前分頁",
     "error-load-page": "載入網頁失敗：",
     "error-load-clipboard": "載入剪貼簿失敗：",
@@ -56,7 +56,7 @@ const TRANSLATIONS = {
     "error-init": "初始化失敗：",
     "lang-set": "語言已切換：{lang}",
     "apikey-modal-title": "設定 API Key",
-    "apikey-modal-hint": "請輸入 API Key（以 pak_ 開頭）",
+    "apikey-modal-hint": "請輸入 API Key（ExpertGPT 以 pak_ 開頭，或直接輸入 GNAI Key）",
     "apikey-cancel": "取消",
     "apikey-confirm": "確認",
     "apikey-updated": "API key 已更新",
@@ -93,7 +93,7 @@ const TRANSLATIONS = {
     "empty-prompts": "还没有常用提示词，请在下方新增",
     "empty-saved-prompts": "点击「管理」来新增常用提示词",
     "new-prompt-placeholder": "输入新的常用提示词...",
-    "error-api-key-prefix": "API key 必须以 pak_ 开头",
+    "error-api-key-prefix": "API key 格式无效，请输入 pak_ 开头（ExpertGPT）或 GNAI Key",
     "error-no-tab": "找不到当前标签页",
     "error-load-page": "载入网页失败：",
     "error-load-clipboard": "载入剪贴板失败：",
@@ -105,7 +105,7 @@ const TRANSLATIONS = {
     "error-init": "初始化失败：",
     "lang-set": "语言已切换：{lang}",
     "apikey-modal-title": "设置 API Key",
-    "apikey-modal-hint": "请输入 API Key（以 pak_ 开头）",
+    "apikey-modal-hint": "请输入 API Key（ExpertGPT 以 pak_ 开头，或直接输入 GNAI Key）",
     "apikey-cancel": "取消",
     "apikey-confirm": "确认",
     "apikey-updated": "API key 已更新",
@@ -142,7 +142,7 @@ const TRANSLATIONS = {
     "empty-prompts": "No saved prompts yet, add one below",
     "empty-saved-prompts": "Click \"Manage\" to add saved prompts",
     "new-prompt-placeholder": "Enter new prompt...",
-    "error-api-key-prefix": "API key must start with pak_",
+    "error-api-key-prefix": "Invalid API key. Enter pak_ key (ExpertGPT) or a GNAI key",
     "error-no-tab": "Cannot find current tab",
     "error-load-page": "Failed to load page: ",
     "error-load-clipboard": "Failed to load clipboard: ",
@@ -154,7 +154,7 @@ const TRANSLATIONS = {
     "error-init": "Initialization failed: ",
     "lang-set": "Language set: {lang}",
     "apikey-modal-title": "Set API Key",
-    "apikey-modal-hint": "Enter your API Key (starts with pak_)",
+    "apikey-modal-hint": "Enter pak_ key (ExpertGPT) or a GNAI key",
     "apikey-cancel": "Cancel",
     "apikey-confirm": "Confirm",
     "apikey-updated": "API key updated",
@@ -271,7 +271,13 @@ async function sendRuntimeMessage(payload) {
 }
 
 function isValidApiKey(key) {
-  return typeof key === "string" && key.startsWith("pak_") && key.length > 8;
+  if (typeof key !== "string" || !key.trim()) return false;
+  if (key.startsWith("pak_")) return key.length > 8;
+  return key.length > 0;
+}
+
+function isGnaiKey(key) {
+  return typeof key === "string" && key.length > 0 && !key.startsWith("pak_");
 }
 
 async function setSingleApiKey(key) {
@@ -455,15 +461,22 @@ function renderModelOptions() {
     header.textContent = `--- ${label} ---`;
     UI.modelSelect.appendChild(header);
 
+    const useGnai = isGnaiKey(state.selectedApiKey || "");
     models.forEach((model) => {
-      const quota = state.modelQuotas[model] || { used: 0, limit: 0 };
       const option = document.createElement("option");
       option.value = model;
       const isRestricted = isAnthropicModelRestricted(model);
       option.disabled = isRestricted;
-      option.textContent = isRestricted
-        ? `${model} (${quota.used}/${quota.limit}) [${t("model-restricted-tag")}]`
-        : `${model} (${quota.used}/${quota.limit})`;
+      if (useGnai) {
+        option.textContent = isRestricted
+          ? `${model} [${t("model-restricted-tag")}]`
+          : model;
+      } else {
+        const quota = state.modelQuotas[model] || { used: 0, limit: 0 };
+        option.textContent = isRestricted
+          ? `${model} (${quota.used}/${quota.limit}) [${t("model-restricted-tag")}]`
+          : `${model} (${quota.used}/${quota.limit})`;
+      }
       UI.modelSelect.appendChild(option);
     });
   }
@@ -920,9 +933,11 @@ async function loadModels() {
   state.models = [...state.openaiModels, ...state.anthropicModels];
   renderModelOptions();
 
-  const quotaResponse = await fetchQuotaFromApi();
-  if (quotaResponse?.ok) {
-    syncModelQuotasFromQuota(quotaResponse.quota || {});
+  if (!isGnaiKey(state.selectedApiKey)) {
+    const quotaResponse = await fetchQuotaFromApi();
+    if (quotaResponse?.ok) {
+      syncModelQuotasFromQuota(quotaResponse.quota || {});
+    }
   }
 
   await saveState();
