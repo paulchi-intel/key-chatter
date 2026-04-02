@@ -140,12 +140,14 @@ async function callExpertGPT(messages, language, apiKey, model) {
 
   const baseUrl = isGnaiKey(apiKey) ? GNAI_OPENAI_BASE_URL : OPENAI_BASE_URL;
   const fullMessages = [{ role: "system", content: systemPrompt }, ...messages];
+  const isReasoningModel = /^o\d/i.test(selectedModel);
   const body = {
     model: selectedModel,
     messages: fullMessages,
     stream: false,
-    temperature: 0.7,
-    max_tokens: 1200
+    ...(isReasoningModel
+      ? { max_completion_tokens: 1200 }
+      : { temperature: 0.7, max_tokens: 1200 })
   };
   const data = await fetchJson(baseUrl, "/chat/completions", apiKey, {
     method: "POST",
