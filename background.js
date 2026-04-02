@@ -140,7 +140,7 @@ async function callExpertGPT(messages, language, apiKey, model) {
 
   const baseUrl = isGnaiKey(apiKey) ? GNAI_OPENAI_BASE_URL : OPENAI_BASE_URL;
   const fullMessages = [{ role: "system", content: systemPrompt }, ...messages];
-  const isReasoningModel = /^o\d/i.test(selectedModel);
+  const isReasoningModel = /^o\d/i.test(selectedModel) || /^gpt-5/i.test(selectedModel);
   const body = {
     model: selectedModel,
     messages: fullMessages,
