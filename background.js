@@ -100,7 +100,18 @@ async function fetchJson(baseUrl, path, apiKey, options = {}) {
 }
 
 async function fetchModels(apiKey) {
-  if (isGnaiKey(apiKey)) return GNAI_OPENAI_MODELS;
+  if (isGnaiKey(apiKey)) {
+    try {
+      const data = await fetchJson(GNAI_OPENAI_BASE_URL, "/models", apiKey);
+      const models = (data.data || [])
+        .map((m) => String(m?.id || "").trim())
+        .filter(Boolean);
+      if (models.length > 0) return models;
+    } catch (_err) {
+      // fall back to hardcoded list
+    }
+    return GNAI_OPENAI_MODELS;
+  }
   assertApiKey(apiKey);
   const data = await fetchJson(OPENAI_BASE_URL, "/models", apiKey);
   return (data.data || [])
@@ -109,7 +120,18 @@ async function fetchModels(apiKey) {
 }
 
 async function fetchAnthropicModels(apiKey) {
-  if (isGnaiKey(apiKey)) return GNAI_ANTHROPIC_MODELS;
+  if (isGnaiKey(apiKey)) {
+    try {
+      const data = await fetchJson(GNAI_ANTHROPIC_BASE_URL, "/v1/models", apiKey);
+      const models = (data.data || [])
+        .map((m) => String(m?.id || "").trim())
+        .filter(Boolean);
+      if (models.length > 0) return models;
+    } catch (_err) {
+      // fall back to hardcoded list
+    }
+    return GNAI_ANTHROPIC_MODELS;
+  }
   assertApiKey(apiKey);
   const data = await fetchJson(ANTHROPIC_BASE_URL, "/models", apiKey);
   return (data.data || [])
