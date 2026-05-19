@@ -66,7 +66,11 @@ const TRANSLATIONS = {
     "panel-mode-to-popup": "切換至彈窗",
     "panel-mode-to-sidepanel": "切換至側欄",
     "panel-mode-switched-popup": "已切換至彈窗模式，下次點擊圖示將開啟彈窗",
-    "panel-mode-switched-sidepanel": "已切換至側欄模式"
+    "panel-mode-switched-sidepanel": "已切換至側欄模式",
+    "save-session": "💾 儲存對話",
+    "status-session-saved": "對話已儲存至 Documents/key-chatter-report/",
+    "status-session-empty": "沒有對話可儲存",
+    "confirm-save-before-clear": "對話尚未儲存，是否要先儲存？"
   },
   "zh-CN": {
     clear: "清除",
@@ -119,7 +123,11 @@ const TRANSLATIONS = {
     "panel-mode-to-popup": "切换至弹窗",
     "panel-mode-to-sidepanel": "切换至侧栏",
     "panel-mode-switched-popup": "已切换至弹窗模式，下次点击图标将开启弹窗",
-    "panel-mode-switched-sidepanel": "已切换至侧栏模式"
+    "panel-mode-switched-sidepanel": "已切换至侧栏模式",
+    "save-session": "💾 储存对话",
+    "status-session-saved": "对话已储存至 Documents/key-chatter-report/",
+    "status-session-empty": "没有对话可储存",
+    "confirm-save-before-clear": "对话尚未保存，是否要先保存？"
   },
   en: {
     clear: "Clear",
@@ -172,7 +180,11 @@ const TRANSLATIONS = {
     "panel-mode-to-popup": "Switch to Popup",
     "panel-mode-to-sidepanel": "Switch to Side Panel",
     "panel-mode-switched-popup": "Switched to popup mode. Next click on the icon will open a popup.",
-    "panel-mode-switched-sidepanel": "Switched to side panel mode."
+    "panel-mode-switched-sidepanel": "Switched to side panel mode.",
+    "save-session": "💾 Save Session",
+    "status-session-saved": "Session saved to Documents/key-chatter-report/",
+    "status-session-empty": "No conversation to save",
+    "confirm-save-before-clear": "Session not saved. Save before clearing?"
   }
 };
 
@@ -180,6 +192,7 @@ const UI = {
   headerTitle: document.getElementById("headerTitle"),
   panelModeBtn: document.getElementById("panelModeBtn"),
   clearBtn: document.getElementById("clearBtn"),
+  saveSessionBtn: document.getElementById("saveSessionBtn"),
   loadPageBtn: document.getElementById("loadPageBtn"),
   loadClipboardBtn: document.getElementById("loadClipboardBtn"),
   languageSelect: document.getElementById("languageSelect"),
@@ -212,7 +225,8 @@ let state = {
   messages: [],
   pageContent: null,
   savedPrompts: [],
-  panelMode: "sidepanel"
+  panelMode: "sidepanel",
+  sessionSaved: false
 };
 
 function t(key, params = {}) {
@@ -879,6 +893,7 @@ async function sendMessage() {
     addMessage("assistant", response.result || "");
     state.messages.push({ role: "user", content: userMessage });
     state.messages.push({ role: "assistant", content: response.result || "" });
+    state.sessionSaved = false;
     incrementModelUsage(state.selectedModel);
     await saveState();
 
@@ -935,6 +950,7 @@ async function handleQuickQuestion(template) {
       addMessage("assistant", response.result || "");
       state.messages.push({ role: "user", content: prompt });
       state.messages.push({ role: "assistant", content: response.result || "" });
+      state.sessionSaved = false;
       incrementModelUsage(state.selectedModel);
       await saveState();
       setStatus("ready", t("status-ready"));
@@ -1030,8 +1046,15 @@ async function loadClipboardContent() {
 }
 
 async function clearConversation() {
+  if (state.messages.length > 0 && !state.sessionSaved) {
+    const confirmSave = confirm(t("confirm-save-before-clear"));
+    if (confirmSave) {
+      await downloadSession();
+    }
+  }
   state.messages = [];
   state.pageContent = null;
+  state.sessionSaved = false;
   hidePageInfo();
   renderMessages();
   await saveState();
@@ -1161,6 +1184,46 @@ function usePrompt(index) {
   closeSavedPromptsModal();
 }
 
+function buildSessionMarkdown() {
+  const lines = [];
+  const dateStr = new Date().toLocaleString();
+  lines.push("# Key Chatter Session\n");
+  lines.push(`**Date**: ${dateStr}  `);
+  lines.push(`**Model**: ${state.selectedModel}  `);
+  if (state.pageContent) {
+    lines.push(`**Page**: [${state.pageContent.title}](${state.pageContent.url})  `);
+  }
+  lines.push("\n---\n");
+  for (const msg of state.messages) {
+    const role = msg.role === "user" ? "## \u{1F464} User" : "## \u{1F916} Assistant";
+    lines.push(role + "\n");
+    lines.push(msg.content + "\n");
+    lines.push("---\n");
+  }
+  return lines.join("\n");
+}
+
+async function downloadSession() {
+  if (state.messages.length === 0) {
+    setStatus("error", t("status-session-empty"));
+    return;
+  }
+  const md = buildSessionMarkdown();
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "");
+  const filename = `key-chatter-report/${ts}.md`;
+  try {
+    await chrome.downloads.download({ url, filename, saveAs: true });
+    state.sessionSaved = true;
+    setStatus("ready", t("status-session-saved"));
+  } catch (err) {
+    setStatus("error", err.message || "Download failed");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function setupEventHandlers() {
   UI.languageSelect.addEventListener("change", async () => {
     state.currentLanguage = UI.languageSelect.value;
@@ -1193,6 +1256,7 @@ function setupEventHandlers() {
   });
 
   UI.panelModeBtn.addEventListener("click", togglePanelMode);
+  UI.saveSessionBtn.addEventListener("click", downloadSession);
   UI.loadPageBtn.addEventListener("click", loadPageContent);
   UI.loadClipboardBtn.addEventListener("click", loadClipboardContent);
   UI.clearBtn.addEventListener("click", clearConversation);

@@ -16,7 +16,8 @@ Key Chatter is a Chrome extension supporting ExpertGPT and GNAI APIs, with webpa
   - **ExpertGPT key**: models fetched dynamically from the API; quota displayed as `(used/limit)` per model
   - **GNAI key**: fixed model list (no quota display); OpenAI models: `gpt-4o`, `gpt-4.1`, `gpt-5-mini`, `gpt-5-nano`, `o3-mini`; Anthropic models: `claude-4-6-opus`, `claude-4-6-sonnet`, `claude-4-5-opus`, `claude-4-5-sonnet`, `claude-4-5-haiku`
 - **Automatic endpoint routing** — Anthropic models route to the Anthropic endpoint; OpenAI-compatible models route to the OpenAI endpoint; each key type uses its own base URL
-- **Header controls** — Clear / Load Page / Load Clipboard / model dropdown / language selector (繁/簡/En) / panel-mode toggle (⊞/◫)
+- **Save Session** — click the 💾 button to download the current conversation as a Markdown file (`.md`); the OS "Save As" dialog opens so you can choose the destination (e.g. `Documents\key-chatter-report`); if you click **Clear** without having saved, a confirmation prompt asks whether to save first
+- **Header controls** — Clear / 💾 Save / Load Page / Load Clipboard / model dropdown / language selector (繁/簡/En) / panel-mode toggle (⊞/◫)
 - **Page info in chat** — after loading a page or clipboard, the source title and URL appear inside the message area above the quick questions
 - **Quick Questions** — appears after loading page/clipboard content; one-click summary templates
 - **Saved Prompts** — manage reusable prompt snippets, accessible from the chat panel
@@ -45,6 +46,7 @@ To change the key later, click **🔑 Key Chatter** in the header.
 7. Use **Saved Prompts** to store and reuse common prompts.
 8. Ask questions normally in the chat box.
 9. To switch to floating popup mode, click **⊞** at the right end of the header; click **◫** inside the popup to switch back.
+10. Click **💾** to save the current conversation as a Markdown file. If you press **Clear** before saving, you will be asked whether to save first.
 
 ## Delivery Notes
 
@@ -56,6 +58,7 @@ To change the key later, click **🔑 Key Chatter** in the header.
 - **Panel mode** is stored in `chrome.storage.local` as `panelMode` (`"sidepanel"` or `"popup"`). The service worker caches it in memory (`_cachedMode`) so the `chrome.action.onClicked` handler never needs an async call before `sidePanel.open()`.
 - **Popup mode** uses `chrome.windows.create({ type: "popup", width: 640, height: 600 })` — a real browser window that can be moved and resized by the OS natively. Re-clicking the extension icon focuses the existing popup instead of opening a second one.
 - **Load Page** queries active tabs across all windows and skips extension-origin URLs, so it works correctly in both sidepanel and popup modes.
+- **Save Session** uses `chrome.downloads.download` with `saveAs: true` to open the OS file-picker. The default filename is `<ISO-timestamp>.md`. The `downloads` permission is declared in `manifest.json`. `state.sessionSaved` is reset to `false` after every new assistant reply and set to `true` after a successful download; `clearConversation` checks this flag before discarding messages.
 
 ## Release Checklist
 
@@ -75,11 +78,13 @@ To change the key later, click **🔑 Key Chatter** in the header.
 7. Verify Saved Prompts add/delete/use flows.
 8. Verify panel-mode toggle: sidepanel → popup (⊞) opens floating window and closes sidepanel; popup → sidepanel (◫) opens sidepanel and closes popup.
 9. Verify markdown rendering: bold, italic, headings, lists, code blocks, tables all render correctly in assistant replies.
-10. Re-check extension permissions in `chrome://extensions` before packaging.
+10. Verify Save Session: click 💾, confirm "Save As" dialog appears; verify the saved `.md` file contains the conversation in Markdown format.
+11. Verify Clear guard: start a chat without saving, click Clear → confirm prompt appears; choose Save → file picker opens; after dismissing, conversation clears.
+12. Re-check extension permissions in `chrome://extensions` before packaging.
 
 ## Files
 
-- `manifest.json`: extension manifest (MV3); permissions include `sidePanel`, `windows`, `activeTab`, `scripting`, `storage`, `clipboardRead`
+- `manifest.json`: extension manifest (MV3); permissions include `sidePanel`, `windows`, `activeTab`, `scripting`, `storage`, `clipboardRead`, `downloads`
 - `background.js`: service worker — API bridge; routes requests to ExpertGPT or GNAI endpoints; handles `SET_PANEL_MODE` (creates popup window or opens sidepanel); caches `_cachedMode` and `_cachedSrcWindowId` for gesture-safe `sidePanel.open()` calls
 - `sidepanel.html`: UI structure and CSS for both sidepanel and popup modes
 - `sidepanel.js`: all UI logic — chat, markdown rendering (`renderMarkdown`), API key modal/validation, model list rendering (with/without quota), quick questions, saved prompts, panel-mode toggle, i18n
