@@ -233,6 +233,14 @@ const UI = {
   confirmSaveCancelBtn: document.getElementById("confirmSaveCancelBtn")
 };
 
+// When running as a popup window, background embeds the source browser windowId
+// in the URL (?srcWindowId=N) so we can call sidePanel.open() synchronously
+// inside the user-gesture handler (before any await breaks the gesture context).
+const POPUP_SRC_WINDOW_ID = (() => {
+  const id = parseInt(new URLSearchParams(window.location.search).get("srcWindowId"), 10);
+  return isNaN(id) ? null : id;
+})();
+
 let tabs = [
   { id: 0, messages: [], pageContent: null, selectedModel: DEFAULT_MODEL, sessionSaved: false }
 ];
@@ -359,6 +367,12 @@ function updateUILanguage() {
     const key = element.getAttribute("data-i18n-placeholder");
     if (!key) return;
     element.placeholder = t(key);
+  });
+
+  document.querySelectorAll("[data-i18n-title]").forEach((element) => {
+    const key = element.getAttribute("data-i18n-title");
+    if (!key) return;
+    element.title = t(key);
   });
 
   UI.languageSelect.value = state.currentLanguage;
@@ -792,6 +806,11 @@ async function togglePanelMode() {
     document.body.classList.add("popup-mode");
   } else {
     document.body.classList.remove("popup-mode");
+    // Call sidePanel.open() immediately — before any await — to preserve the
+    // user gesture context (Chrome requires it to be synchronous in the handler).
+    if (POPUP_SRC_WINDOW_ID) {
+      chrome.sidePanel.open({ windowId: POPUP_SRC_WINDOW_ID }).catch(() => {});
+    }
   }
 
   updatePanelModeBtn();
@@ -799,8 +818,6 @@ async function togglePanelMode() {
 
   const response = await sendRuntimeMessage({ type: "SET_PANEL_MODE", mode: newMode });
   if (response?.ok) {
-    // For sidepanel: background opened it, close this popup.
-    // For popup: background closed the sidepanel, but try window.close() as well.
     window.close();
   } else {
     setStatus("error", response?.error || "Mode switch failed");
@@ -1292,6 +1309,7 @@ async function clearConversation() {
   state.sessionSaved = false;
   hidePageInfo();
   renderMessages();
+  commitActiveTab();
   renderTabBar();
   await saveState();
   setStatus("ready", t("status-ready"));

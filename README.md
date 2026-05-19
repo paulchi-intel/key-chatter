@@ -21,7 +21,7 @@ Key Chatter is a Chrome extension supporting ExpertGPT and GNAI APIs, with multi
 - **Page info in chat** — after loading a page or clipboard, the source title and URL appear inside the message area above the quick questions
 - **Quick Questions** — appears after loading page/clipboard content; one-click summary templates; correctly restored when switching back to a tab that has content loaded
 - **Saved Prompts** — manage reusable prompt snippets, accessible from the chat panel
-- **i18n** — full UI in Traditional Chinese, Simplified Chinese, and English
+- **i18n** — full UI in Traditional Chinese, Simplified Chinese, and English; button tooltips (`title` attributes) also update with the selected language via `data-i18n-title`; the language selector shows native script for each option (繁 / 简 / En)
 - **Reliability guards** — request timeouts, explicit background/runtime error handling, and async response routing so replies always land in the correct tab even if you switch tabs while waiting
 
 ## API Key
@@ -57,10 +57,10 @@ To change the key later, click **🔑 Key Chatter** in the header.
 - Anthropic models always route to the Anthropic-format endpoint (`/v1/messages`); OpenAI-compatible models route to `/chat/completions`.
 - Legacy `apiKeys[]` data is auto-migrated to single-key mode at startup.
 - **Panel mode** is stored in `chrome.storage.local` as `panelMode` (`"sidepanel"` or `"popup"`). The service worker caches it in memory (`_cachedMode`) so the `chrome.action.onClicked` handler never needs an async call before `sidePanel.open()`.
-- **Popup mode** uses `chrome.windows.create({ type: "popup", width: 640, height: 600 })` — a real browser window that can be moved and resized by the OS natively. Re-clicking the extension icon focuses the existing popup instead of opening a second one.
+- **Popup mode** uses `chrome.windows.create({ type: "popup", width: 640, height: 600 })` — a real browser window that can be moved and resized by the OS natively. Re-clicking the extension icon focuses the existing popup instead of opening a second one. When creating the popup, background embeds the source browser `windowId` as a URL query parameter (`?srcWindowId=N`). When the user clicks ◫ to switch back to sidepanel, `sidepanel.js` reads `POPUP_SRC_WINDOW_ID` synchronously from the URL and calls `chrome.sidePanel.open({ windowId })` **before any `await`** to preserve the user gesture context (Chrome requires `sidePanel.open()` to be called synchronously within a gesture handler; routing through the service worker loses the context).
 - **Load Page** queries active tabs across all windows and skips extension-origin URLs, so it works correctly in both sidepanel and popup modes.
 - **Multi-tab state** is stored as `kc_tabs` (array of tab snapshots), `kc_active_tab_id`, and `kc_next_tab_id` in `chrome.storage.local`. Legacy single-tab storage keys are auto-migrated into `tabs[0]` on first load. Each tab carries its own `messages`, `pageContent`, `selectedModel`, and `sessionSaved` fields. A "state proxy" pattern keeps `state.*` in sync with the active tab; `commitActiveTab()` is called before every tab switch or save.
-- **Tab labels** are derived from the loaded page title (truncated), "Clipboard" (for clipboard content), or "empty" (for a new, unused tab).
+- **Tab labels** are derived from the loaded page title (truncated), "Clipboard" (for clipboard content), or "empty" (for a new or cleared tab). The label updates immediately when content is loaded or the tab is cleared, because `commitActiveTab()` is called before `renderTabBar()` in all relevant code paths.
 - **Async response routing** — `sendMessage` captures `srcTabId` before the API call; if the user switches tabs during a request, the reply is stored directly into the source tab's `messages` array without touching the UI.
 - **Unsaved-session guard** — when the user clicks **Clear** or the tab × button and the current tab has unsaved messages, a custom in-page **Yes / No / Cancel** modal (`confirmSaveModal`) is shown instead of the browser's native `confirm()` dialog. **Yes** calls `downloadSession()` then proceeds; **No** skips saving and proceeds; **Cancel** (or pressing Escape / clicking the backdrop) aborts with no changes. Button order left-to-right: Yes → No → Cancel.
 - **Save Session** uses `chrome.downloads.download` with `saveAs: true` to open the OS file-picker. The default filename is `<ISO-timestamp>.md`. The `downloads` permission is declared in `manifest.json`. A `chrome.downloads.onChanged` listener detects whether the user completed or cancelled the save dialog; `state.sessionSaved` is set to `true` only on confirmed save and reset to `false` after every new assistant reply.
@@ -82,11 +82,11 @@ To change the key later, click **🔑 Key Chatter** in the header.
 5. Verify chat works in all 3 languages (繁/簡/En).
 6. Verify `Load Page` and `Load Clipboard` both produce context-aware answers (test in both sidepanel and popup modes).
 7. Verify Saved Prompts add/delete/use flows.
-8. Verify panel-mode toggle: sidepanel → popup (⊞) opens floating window and closes sidepanel; popup → sidepanel (◫) opens sidepanel and closes popup.
+8. Verify panel-mode toggle: sidepanel → popup (⊞) opens floating window and closes sidepanel; popup → sidepanel (◫) opens sidepanel and closes popup **without** the `sidePanel.open() may only be called in response to a user gesture` error.
 9. Verify markdown rendering: bold, italic, headings, lists, code blocks, tables all render correctly in assistant replies.
 10. Verify Save Session: click 💾, confirm "Save As" dialog appears; verify the saved `.md` file contains the conversation in Markdown format; cancel the dialog and verify no "saved" status is shown.
 11. Verify Clear guard: start a chat without saving, click Clear → **Yes/No/Cancel** in-page dialog appears; click **Cancel** → nothing happens; click **No** → conversation clears without saving; repeat and click **Yes** → file picker opens, then conversation clears. Also verify × on a tab triggers the same dialog.
-12. **Multi-tab**: click + to open a second tab; load a different page; verify each tab keeps its own history and label; close a tab with × and confirm the adjacent tab becomes active; reload the extension and confirm tab state is restored.
+12. **Multi-tab**: click + to open a second tab; load a different page; verify each tab keeps its own history and label; close a tab with × and confirm the adjacent tab becomes active; reload the extension and confirm tab state is restored; click **Clear** on a tab with content and verify the tab label immediately changes to "empty".
 13. Verify async routing: start a slow request, switch tabs while waiting — the reply should land in the originating tab, not the active one.
 14. Re-check extension permissions in `chrome://extensions` before packaging.
 

@@ -43,7 +43,7 @@ chrome.windows.onRemoved.addListener(id => {
 let _cachedMode = "sidepanel";
 let _cachedSrcWindowId = null;
 
-async function openPopupWindow() {
+async function openPopupWindow(srcWindowId = null) {
   if (_bgPopupWindowId !== null) {
     try {
       await chrome.windows.update(_bgPopupWindowId, { focused: true });
@@ -52,8 +52,13 @@ async function openPopupWindow() {
       _bgPopupWindowId = null;
     }
   }
+  // Embed srcWindowId in the URL so sidepanel.js can call sidePanel.open() in-gesture
+  const resolvedSrcWindowId = srcWindowId
+    || (await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null))?.id;
+  const baseUrl = chrome.runtime.getURL("sidepanel.html");
+  const url = resolvedSrcWindowId ? `${baseUrl}?srcWindowId=${resolvedSrcWindowId}` : baseUrl;
   const win = await chrome.windows.create({
-    url: chrome.runtime.getURL("sidepanel.html"),
+    url,
     type: "popup",
     width: 640,
     height: 600
@@ -82,7 +87,7 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.action.onClicked.addListener((tab) => {
   _cachedSrcWindowId = tab.windowId;  // remember for SET_PANEL_MODE sidepanel switch
   if (_cachedMode === "popup") {
-    openPopupWindow();
+    openPopupWindow(tab.windowId);
   } else {
     chrome.sidePanel.open({ windowId: tab.windowId });
   }
@@ -321,14 +326,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           // Save state, then open popup window; sidepanel.js will window.close() itself
           await chrome.storage.local.set({ panelMode: mode });
           await applyPanelMode(mode);
-          await openPopupWindow();
+          await openPopupWindow(_cachedSrcWindowId);
           sendResponse({ ok: true });
         } else {
-          // Open sidepanel FIRST to stay as close to the user gesture as possible.
-          // Use cached source windowId; fall back to getLastFocused if stale.
-          const winId = _cachedSrcWindowId
-            || (await chrome.windows.getLastFocused().catch(() => null))?.id;
-          if (winId) await chrome.sidePanel.open({ windowId: winId });
+          // sidepanel.js calls chrome.sidePanel.open() directly (in-gesture) before
+          // sending this message, so we only need to persist state and close the popup.
           await chrome.storage.local.set({ panelMode: mode });
           await applyPanelMode(mode);
           sendResponse({ ok: true });
