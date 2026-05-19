@@ -214,6 +214,10 @@ const UI = {
   closeApiKeyModal: document.getElementById("closeApiKeyModal")
 };
 
+let tabs = [
+  { id: 0, messages: [], pageContent: null, selectedModel: DEFAULT_MODEL, sessionSaved: false }
+];
+
 let state = {
   currentLanguage: "zh-TW",
   selectedApiKey: "",
@@ -226,7 +230,9 @@ let state = {
   pageContent: null,
   savedPrompts: [],
   panelMode: "sidepanel",
-  sessionSaved: false
+  sessionSaved: false,
+  activeTabId: 0,
+  nextTabId: 1,
 };
 
 function t(key, params = {}) {
@@ -631,14 +637,15 @@ function incrementModelUsage(model) {
 }
 
 async function saveState() {
+  commitActiveTab();
   await chrome.storage.local.set({
     [STORAGE_KEYS.selectedApiKey]: state.selectedApiKey,
-    [STORAGE_KEYS.selectedModel]: state.selectedModel,
     [STORAGE_KEYS.language]: state.currentLanguage,
-    [STORAGE_KEYS.messages]: state.messages,
-    [STORAGE_KEYS.pageContent]: state.pageContent,
     [STORAGE_KEYS.savedPrompts]: state.savedPrompts,
-    [STORAGE_KEYS.panelMode]: state.panelMode
+    [STORAGE_KEYS.panelMode]: state.panelMode,
+    kc_tabs: tabs,
+    kc_active_tab_id: state.activeTabId,
+    kc_next_tab_id: state.nextTabId,
   });
 }
 
@@ -650,7 +657,10 @@ async function initializeState() {
     STORAGE_KEYS.messages,
     STORAGE_KEYS.pageContent,
     STORAGE_KEYS.savedPrompts,
-    STORAGE_KEYS.panelMode
+    STORAGE_KEYS.panelMode,
+    "kc_tabs",
+    "kc_active_tab_id",
+    "kc_next_tab_id",
   ]);
 
   // Backward compatibility: migrate first valid key from legacy apiKeys[] storage.
@@ -659,14 +669,36 @@ async function initializeState() {
   const selectedKey = stored[STORAGE_KEYS.selectedApiKey];
 
   state.selectedApiKey = isValidApiKey(selectedKey) ? selectedKey : firstStoredKey || "";
-  state.selectedModel = stored[STORAGE_KEYS.selectedModel] || DEFAULT_MODEL;
   state.openaiModels = [];
   state.anthropicModels = [];
   state.currentLanguage = stored[STORAGE_KEYS.language] || "zh-TW";
-  state.messages = Array.isArray(stored[STORAGE_KEYS.messages]) ? stored[STORAGE_KEYS.messages] : [];
-  state.pageContent = stored[STORAGE_KEYS.pageContent] || null;
   state.savedPrompts = Array.isArray(stored[STORAGE_KEYS.savedPrompts]) ? stored[STORAGE_KEYS.savedPrompts] : [];
   state.panelMode = stored[STORAGE_KEYS.panelMode] || "sidepanel";
+
+  // Load tabs or migrate from legacy flat storage
+  if (Array.isArray(stored.kc_tabs) && stored.kc_tabs.length > 0) {
+    tabs = stored.kc_tabs;
+    state.activeTabId = stored.kc_active_tab_id ?? tabs[0].id;
+    state.nextTabId   = stored.kc_next_tab_id   ?? tabs.length;
+    if (!tabs.find(t => t.id === state.activeTabId)) state.activeTabId = tabs[0].id;
+  } else {
+    tabs = [{
+      id: 0,
+      messages:      Array.isArray(stored[STORAGE_KEYS.messages]) ? stored[STORAGE_KEYS.messages] : [],
+      pageContent:   stored[STORAGE_KEYS.pageContent] || null,
+      selectedModel: stored[STORAGE_KEYS.selectedModel] || DEFAULT_MODEL,
+      sessionSaved:  false,
+    }];
+    state.activeTabId = 0;
+    state.nextTabId   = 1;
+  }
+
+  // Load active tab into state
+  const activeTab = tabs.find(t => t.id === state.activeTabId) || tabs[0];
+  state.messages      = activeTab.messages;
+  state.pageContent   = activeTab.pageContent;
+  state.selectedModel = activeTab.selectedModel || DEFAULT_MODEL;
+  state.sessionSaved  = activeTab.sessionSaved  || false;
 
   // Apply popup-mode CSS class
   if (state.panelMode === "popup") {
@@ -677,6 +709,7 @@ async function initializeState() {
   updatePanelModeBtn();
 
   renderModelOptions();
+  renderTabBar();
   renderMessages();
 
   if (state.pageContent) {
@@ -719,6 +752,114 @@ async function togglePanelMode() {
   } else {
     setStatus("error", response?.error || "Mode switch failed");
   }
+}
+
+// ── Tab management ──────────────────────────────────────────────────────────
+function commitActiveTab() {
+  const tab = tabs.find(t => t.id === state.activeTabId);
+  if (!tab) return;
+  tab.messages      = state.messages;
+  tab.pageContent   = state.pageContent;
+  tab.selectedModel = state.selectedModel;
+  tab.sessionSaved  = state.sessionSaved;
+}
+
+function getTabLabel(tab) {
+  if (tab.pageContent?.title) {
+    const title = tab.pageContent.title.trim();
+    return title.length > 14 ? title.slice(0, 14) + "\u2026" : title;
+  }
+  return `Chat ${tab.id + 1}`;
+}
+
+function renderTabBar() {
+  const bar = document.getElementById("tabBar");
+  if (!bar) return;
+  bar.innerHTML = "";
+  tabs.forEach(tab => {
+    const btn = document.createElement("button");
+    btn.className = "tab-item" + (tab.id === state.activeTabId ? " active" : "");
+    const label = document.createElement("span");
+    label.className = "tab-label";
+    label.textContent = getTabLabel(tab);
+    btn.appendChild(label);
+    if (tabs.length > 1) {
+      const close = document.createElement("span");
+      close.className = "tab-close";
+      close.textContent = "\xd7";
+      close.addEventListener("click", e => { e.stopPropagation(); closeTab(tab.id); });
+      btn.appendChild(close);
+    }
+    btn.addEventListener("click", () => switchTab(tab.id));
+    bar.appendChild(btn);
+  });
+  const addBtn = document.createElement("button");
+  addBtn.className = "tab-add";
+  addBtn.textContent = "+";
+  addBtn.title = "New tab";
+  addBtn.addEventListener("click", addTab);
+  bar.appendChild(addBtn);
+}
+
+async function addTab() {
+  commitActiveTab();
+  const id = state.nextTabId;
+  state.nextTabId++;
+  tabs.push({ id, messages: [], pageContent: null, selectedModel: state.selectedModel, sessionSaved: false });
+  state.activeTabId  = id;
+  state.messages     = [];
+  state.pageContent  = null;
+  state.sessionSaved = false;
+  renderTabBar();
+  hidePageInfo();
+  renderMessages();
+  UI.modelSelect.value = state.selectedModel;
+  await saveState();
+}
+
+async function switchTab(id) {
+  if (id === state.activeTabId) return;
+  commitActiveTab();
+  state.activeTabId = id;
+  const tab = tabs.find(t => t.id === id) || tabs[0];
+  state.messages      = tab.messages;
+  state.pageContent   = tab.pageContent;
+  state.selectedModel = tab.selectedModel;
+  state.sessionSaved  = tab.sessionSaved;
+  renderTabBar();
+  renderMessages();
+  UI.modelSelect.value = state.selectedModel;
+  if (state.pageContent) showPageInfo(state.pageContent.title, state.pageContent.url);
+  else hidePageInfo();
+  await saveState();
+}
+
+async function closeTab(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  if (id === state.activeTabId && state.messages.length > 0 && !state.sessionSaved) {
+    const confirmSave = confirm(t("confirm-save-before-clear"));
+    if (confirmSave) await downloadSession();
+  }
+  tabs.splice(idx, 1);
+  if (tabs.length === 0) {
+    tabs.push({ id: state.nextTabId, messages: [], pageContent: null, selectedModel: DEFAULT_MODEL, sessionSaved: false });
+    state.nextTabId++;
+  }
+  if (id === state.activeTabId) {
+    const next = tabs[Math.min(idx, tabs.length - 1)];
+    state.activeTabId   = next.id;
+    state.messages      = next.messages;
+    state.pageContent   = next.pageContent;
+    state.selectedModel = next.selectedModel;
+    state.sessionSaved  = next.sessionSaved;
+  }
+  renderTabBar();
+  renderMessages();
+  UI.modelSelect.value = state.selectedModel;
+  if (state.pageContent) showPageInfo(state.pageContent.title, state.pageContent.url);
+  else hidePageInfo();
+  await saveState();
 }
 
 function showQuickQuestions() {
@@ -1000,6 +1141,7 @@ async function loadPageContent() {
     showPageInfo(state.pageContent.title, state.pageContent.url);
     addSystemMessage(t("system-page-loaded"));
     showQuickQuestions();
+    renderTabBar();
 
     await saveState();
     setStatus("ready", t("status-page-loaded"));
@@ -1034,6 +1176,7 @@ async function loadClipboardContent() {
     showPageInfo(`📋 ${t("load-clipboard")}`, `${clipboardText.length} chars`);
     addSystemMessage(t("system-clipboard-loaded"));
     showQuickQuestions();
+    renderTabBar();
 
     await saveState();
     setStatus("ready", t("status-clipboard-loaded"));
@@ -1046,6 +1189,11 @@ async function loadClipboardContent() {
 }
 
 async function clearConversation() {
+  if (tabs.length > 1) {
+    await closeTab(state.activeTabId);
+    return;
+  }
+  // Only one tab: clear its content
   if (state.messages.length > 0 && !state.sessionSaved) {
     const confirmSave = confirm(t("confirm-save-before-clear"));
     if (confirmSave) {
@@ -1057,6 +1205,7 @@ async function clearConversation() {
   state.sessionSaved = false;
   hidePageInfo();
   renderMessages();
+  renderTabBar();
   await saveState();
   setStatus("ready", t("status-ready"));
 }

@@ -838,6 +838,90 @@
     body.popup-mode {
       overflow: hidden;
     }
+
+    /* Tab bar */
+    .tab-bar {
+      display: flex;
+      align-items: stretch;
+      background: #fff;
+      border-bottom: 2px solid #e5e7eb;
+      flex-shrink: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 10px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7280;
+      cursor: pointer;
+      white-space: nowrap;
+      max-width: 160px;
+      min-width: 60px;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+    .tab-item.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+      font-weight: 600;
+    }
+    .tab-item:hover:not(.active) {
+      background: #f9fafb;
+      color: #374151;
+    }
+    .tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      min-width: 0;
+      text-align: left;
+    }
+    .tab-close {
+      flex-shrink: 0;
+      width: 15px;
+      height: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 3px;
+      font-size: 14px;
+      color: #9ca3af;
+      line-height: 1;
+    }
+    .tab-close:hover {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    .tab-add {
+      flex-shrink: 0;
+      padding: 0 12px;
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: #6b7280;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: color 0.15s, background 0.15s;
+      font-family: inherit;
+      align-self: stretch;
+      display: flex;
+      align-items: center;
+    }
+    .tab-add:hover {
+      color: #3b82f6;
+      background: #f9fafb;
+    }
   </style>
 </head>
 <body>
@@ -857,6 +941,8 @@
       <button class="panel-mode-btn" id="panelModeBtn" title="切換顯示模式">⊞</button>
     </div>
   </div>
+
+  <div class="tab-bar" id="tabBar"></div>
 
   <section id="chatPanel">
     <div class="status-bar">
