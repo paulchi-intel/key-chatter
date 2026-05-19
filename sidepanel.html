@@ -735,6 +735,21 @@
       opacity: 0.9;
     }
 
+    .modal-btn-no {
+      padding: 8px 16px;
+      border: 1px solid #ef4444;
+      background: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #ef4444;
+      transition: background 0.2s;
+    }
+
+    .modal-btn-no:hover {
+      background: #fef2f2;
+    }
+
     .saved-prompt-item {
       display: flex;
       gap: 8px;
@@ -942,14 +957,14 @@
     </div>
   </div>
 
+  <div class="status-bar">
+    <span class="status-indicator" id="statusIndicator"></span>
+    <span id="statusText" data-i18n="status-ready">準備就緒</span>
+  </div>
+
   <div class="tab-bar" id="tabBar"></div>
 
   <section id="chatPanel">
-    <div class="status-bar">
-      <span class="status-indicator" id="statusIndicator"></span>
-      <span id="statusText" data-i18n="status-ready">準備就緒</span>
-    </div>
-
     <div class="chat-container">
       <div class="messages-container" id="messagesContainer">
         <div class="empty-state">
@@ -994,6 +1009,21 @@
         <div class="add-prompt-section">
           <textarea id="newPromptInput" data-i18n-placeholder="new-prompt-placeholder" placeholder="輸入新的常用提示詞..." rows="3"></textarea>
           <button id="addPromptBtn" class="add-prompt-btn" data-i18n="add-prompt">新增提示詞</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmSaveModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 data-i18n="confirm-save-before-clear">對話尚未儲存，是否要先儲存？</h3>
+      </div>
+      <div class="modal-body">
+        <div class="modal-actions">
+          <button id="confirmSaveYesBtn" class="modal-btn-confirm" data-i18n="dialog-yes">是</button>
+          <button id="confirmSaveNoBtn" class="modal-btn-no" data-i18n="dialog-no">否</button>
+          <button id="confirmSaveCancelBtn" class="modal-btn-cancel" data-i18n="dialog-cancel">取消</button>
         </div>
       </div>
     </div>

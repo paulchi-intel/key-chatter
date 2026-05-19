@@ -68,9 +68,14 @@ const TRANSLATIONS = {
     "panel-mode-switched-popup": "已切換至彈窗模式，下次點擊圖示將開啟彈窗",
     "panel-mode-switched-sidepanel": "已切換至側欄模式",
     "save-session": "💾 儲存對話",
-    "status-session-saved": "對話已儲存至 Documents/key-chatter-report/",
+    "status-session-saved": "對話已儲存",
     "status-session-empty": "沒有對話可儲存",
-    "confirm-save-before-clear": "對話尚未儲存，是否要先儲存？"
+    "confirm-save-before-clear": "對話尚未儲存，是否要先儲存？",
+    "dialog-yes": "是",
+    "dialog-no": "否",
+    "dialog-cancel": "取消",
+    "clipboard-tab-label": "剪貼簿內容",
+    "empty-tab-label": "empty"
   },
   "zh-CN": {
     clear: "清除",
@@ -125,9 +130,14 @@ const TRANSLATIONS = {
     "panel-mode-switched-popup": "已切换至弹窗模式，下次点击图标将开启弹窗",
     "panel-mode-switched-sidepanel": "已切换至侧栏模式",
     "save-session": "💾 储存对话",
-    "status-session-saved": "对话已储存至 Documents/key-chatter-report/",
+    "status-session-saved": "对话已保存",
     "status-session-empty": "没有对话可储存",
-    "confirm-save-before-clear": "对话尚未保存，是否要先保存？"
+    "confirm-save-before-clear": "对话尚未保存，是否要先保存？",
+    "dialog-yes": "是",
+    "dialog-no": "否",
+    "dialog-cancel": "取消",
+    "clipboard-tab-label": "剪贴板内容",
+    "empty-tab-label": "empty"
   },
   en: {
     clear: "Clear",
@@ -182,9 +192,14 @@ const TRANSLATIONS = {
     "panel-mode-switched-popup": "Switched to popup mode. Next click on the icon will open a popup.",
     "panel-mode-switched-sidepanel": "Switched to side panel mode.",
     "save-session": "💾 Save Session",
-    "status-session-saved": "Session saved to Documents/key-chatter-report/",
+    "status-session-saved": "Session saved",
     "status-session-empty": "No conversation to save",
-    "confirm-save-before-clear": "Session not saved. Save before clearing?"
+    "confirm-save-before-clear": "Session not saved. Save before clearing?",
+    "dialog-yes": "Yes",
+    "dialog-no": "No",
+    "dialog-cancel": "Cancel",
+    "clipboard-tab-label": "Clipboard",
+    "empty-tab-label": "empty"
   }
 };
 
@@ -211,7 +226,11 @@ const UI = {
   apiKeyInput: document.getElementById("apiKeyInput"),
   apiKeyConfirmBtn: document.getElementById("apiKeyConfirmBtn"),
   apiKeyCancelBtn: document.getElementById("apiKeyCancelBtn"),
-  closeApiKeyModal: document.getElementById("closeApiKeyModal")
+  closeApiKeyModal: document.getElementById("closeApiKeyModal"),
+  confirmSaveModal: document.getElementById("confirmSaveModal"),
+  confirmSaveYesBtn: document.getElementById("confirmSaveYesBtn"),
+  confirmSaveNoBtn: document.getElementById("confirmSaveNoBtn"),
+  confirmSaveCancelBtn: document.getElementById("confirmSaveCancelBtn")
 };
 
 let tabs = [
@@ -441,6 +460,33 @@ function promptForApiKey(force = false) {
   });
 }
 
+function showConfirmSaveDialog() {
+  return new Promise((resolve) => {
+    UI.confirmSaveModal.classList.add("show");
+
+    function cleanup() {
+      UI.confirmSaveModal.classList.remove("show");
+      UI.confirmSaveYesBtn.removeEventListener("click", onYes);
+      UI.confirmSaveNoBtn.removeEventListener("click", onNo);
+      UI.confirmSaveCancelBtn.removeEventListener("click", onCancel);
+      UI.confirmSaveModal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKeydown);
+    }
+
+    function onYes() { cleanup(); resolve("yes"); }
+    function onNo() { cleanup(); resolve("no"); }
+    function onCancel() { cleanup(); resolve("cancel"); }
+    function onBackdrop(e) { if (e.target === UI.confirmSaveModal) onCancel(); }
+    function onKeydown(e) { if (e.key === "Escape") onCancel(); }
+
+    UI.confirmSaveYesBtn.addEventListener("click", onYes);
+    UI.confirmSaveNoBtn.addEventListener("click", onNo);
+    UI.confirmSaveCancelBtn.addEventListener("click", onCancel);
+    UI.confirmSaveModal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKeydown);
+  });
+}
+
 async function ensureApiKey(forcePrompt = false) {
   if (isValidApiKey(state.selectedApiKey)) {
     return true;
@@ -520,7 +566,14 @@ function renderMessages() {
   UI.messagesContainer.innerHTML = "";
 
   if (!state.messages.length) {
-    renderEmptyState();
+    if (state.pageContent) {
+      // Content loaded but no conversation yet — restore system message + quick questions
+      const sysKey = state.pageContent.url === "clipboard://" ? "system-clipboard-loaded" : "system-page-loaded";
+      addSystemMessage(t(sysKey));
+      showQuickQuestions();
+    } else {
+      renderEmptyState();
+    }
     return;
   }
 
@@ -765,11 +818,14 @@ function commitActiveTab() {
 }
 
 function getTabLabel(tab) {
+  if (tab.pageContent?.url === "clipboard://") {
+    return t("clipboard-tab-label");
+  }
   if (tab.pageContent?.title) {
     const title = tab.pageContent.title.trim();
     return title.length > 14 ? title.slice(0, 14) + "\u2026" : title;
   }
-  return `Chat ${tab.id + 1}`;
+  return t("empty-tab-label");
 }
 
 function renderTabBar() {
@@ -838,8 +894,9 @@ async function closeTab(id) {
   const idx = tabs.findIndex(t => t.id === id);
   if (idx === -1) return;
   if (id === state.activeTabId && state.messages.length > 0 && !state.sessionSaved) {
-    const confirmSave = confirm(t("confirm-save-before-clear"));
-    if (confirmSave) await downloadSession();
+    const choice = await showConfirmSaveDialog();
+    if (choice === "cancel") return;
+    if (choice === "yes") await downloadSession();
   }
   tabs.splice(idx, 1);
   if (tabs.length === 0) {
@@ -1012,6 +1069,7 @@ async function sendMessage() {
   UI.sendBtn.disabled = true;
   UI.messageInput.disabled = true;
   setStatus("loading", t("status-sending"));
+  const srcTabId = state.activeTabId;
 
   addMessage("user", userMessage);
   UI.messageInput.value = "";
@@ -1028,6 +1086,20 @@ async function sendMessage() {
 
     if (!response?.ok) {
       setStatus("error", t("error-send") + (response?.error || "Unknown error"));
+      return;
+    }
+
+    // If the user switched tabs while waiting, route response to the originating tab
+    if (state.activeTabId !== srcTabId) {
+      const srcTab = tabs.find(t => t.id === srcTabId);
+      if (srcTab) {
+        srcTab.messages.push({ role: "user", content: userMessage });
+        srcTab.messages.push({ role: "assistant", content: response.result || "" });
+        srcTab.sessionSaved = false;
+      }
+      incrementModelUsage(state.selectedModel);
+      await saveState();
+      setStatus("ready", t("status-ready"));
       return;
     }
 
@@ -1070,6 +1142,7 @@ async function handleQuickQuestion(template) {
     UI.sendBtn.disabled = true;
     UI.messageInput.disabled = true;
     setStatus("loading", t("status-sending"));
+    const srcTabId = state.activeTabId;
 
     try {
       addMessage("user", prompt);
@@ -1085,6 +1158,19 @@ async function handleQuickQuestion(template) {
 
       if (!response?.ok) {
         setStatus("error", t("error-send") + (response?.error || "Unknown error"));
+        return;
+      }
+
+      if (state.activeTabId !== srcTabId) {
+        const srcTab = tabs.find(t => t.id === srcTabId);
+        if (srcTab) {
+          srcTab.messages.push({ role: "user", content: prompt });
+          srcTab.messages.push({ role: "assistant", content: response.result || "" });
+          srcTab.sessionSaved = false;
+        }
+        incrementModelUsage(state.selectedModel);
+        await saveState();
+        setStatus("ready", t("status-ready"));
         return;
       }
 
@@ -1141,6 +1227,7 @@ async function loadPageContent() {
     showPageInfo(state.pageContent.title, state.pageContent.url);
     addSystemMessage(t("system-page-loaded"));
     showQuickQuestions();
+    commitActiveTab();
     renderTabBar();
 
     await saveState();
@@ -1176,6 +1263,7 @@ async function loadClipboardContent() {
     showPageInfo(`📋 ${t("load-clipboard")}`, `${clipboardText.length} chars`);
     addSystemMessage(t("system-clipboard-loaded"));
     showQuickQuestions();
+    commitActiveTab();
     renderTabBar();
 
     await saveState();
@@ -1195,10 +1283,9 @@ async function clearConversation() {
   }
   // Only one tab: clear its content
   if (state.messages.length > 0 && !state.sessionSaved) {
-    const confirmSave = confirm(t("confirm-save-before-clear"));
-    if (confirmSave) {
-      await downloadSession();
-    }
+    const choice = await showConfirmSaveDialog();
+    if (choice === "cancel") return;
+    if (choice === "yes") await downloadSession();
   }
   state.messages = [];
   state.pageContent = null;
@@ -1363,9 +1450,39 @@ async function downloadSession() {
   const ts = new Date().toISOString().slice(0, 19).replace("T", "_").replace(/:/g, "");
   const filename = `key-chatter-report/${ts}.md`;
   try {
-    await chrome.downloads.download({ url, filename, saveAs: true });
-    state.sessionSaved = true;
-    setStatus("ready", t("status-session-saved"));
+    const downloadId = await chrome.downloads.download({ url, filename, saveAs: true });
+
+    // Wait for the download to either complete or be cancelled by the user
+    const savedOk = await new Promise((resolve) => {
+      const onChanged = (delta) => {
+        if (delta.id !== downloadId) return;
+        if (delta.state?.current === "complete") {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          resolve(true);
+        } else if (delta.state?.current === "interrupted") {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          resolve(false);
+        }
+      };
+      chrome.downloads.onChanged.addListener(onChanged);
+      // Also check immediately in case the state already settled before we registered
+      chrome.downloads.search({ id: downloadId }).then(([item]) => {
+        if (item?.state === "complete") {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          resolve(true);
+        } else if (item?.state === "interrupted") {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          resolve(false);
+        }
+      });
+    });
+
+    if (savedOk) {
+      state.sessionSaved = true;
+      setStatus("ready", t("status-session-saved"));
+    } else {
+      setStatus("ready", t("status-ready"));
+    }
   } catch (err) {
     setStatus("error", err.message || "Download failed");
   } finally {
