@@ -8,7 +8,8 @@
     "scripting",
     "storage",
     "sidePanel",
-    "clipboardRead"
+    "clipboardRead",
+    "windows"
   ],
   "host_permissions": [
     "<all_urls>"

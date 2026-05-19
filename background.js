@@ -22,7 +22,8 @@ const MESSAGE_TYPES = {
   GET_MODELS: "GET_MODELS",
   GET_PAGE_CONTENT: "GET_PAGE_CONTENT",
   CHAT: "CHAT",
-  GET_QUOTA: "GET_QUOTA"
+  GET_QUOTA: "GET_QUOTA",
+  SET_PANEL_MODE: "SET_PANEL_MODE"
 };
 
 const SYSTEM_PROMPTS = {
@@ -31,8 +32,60 @@ const SYSTEM_PROMPTS = {
   "en": "You are a friendly and helpful AI assistant. Answer clearly, accurately, and with actionable details."
 };
 
+// Track the popup window so we can focus it instead of creating a duplicate
+let _bgPopupWindowId = null;
+chrome.windows.onRemoved.addListener(id => {
+  if (id === _bgPopupWindowId) _bgPopupWindowId = null;
+});
+
+// Cache mode + source window in memory so onClicked never needs an await
+// (sidePanel.open must be called synchronously in the user-gesture handler)
+let _cachedMode = "sidepanel";
+let _cachedSrcWindowId = null;
+
+async function openPopupWindow() {
+  if (_bgPopupWindowId !== null) {
+    try {
+      await chrome.windows.update(_bgPopupWindowId, { focused: true });
+      return;
+    } catch (e) {
+      _bgPopupWindowId = null;
+    }
+  }
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL("sidepanel.html"),
+    type: "popup",
+    width: 640,
+    height: 600
+  });
+  _bgPopupWindowId = win.id;
+}
+
+async function applyPanelMode(_mode) {
+  // Always keep action popup empty; opening is handled by onClicked / openPopupWindow
+  await chrome.action.setPopup({ popup: "" });
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const stored = await chrome.storage.local.get(["panelMode"]);
+  _cachedMode = stored.panelMode || "sidepanel";
+  await applyPanelMode(_cachedMode);
+});
+
+chrome.runtime.onStartup.addListener(async () => {
+  const stored = await chrome.storage.local.get(["panelMode"]);
+  _cachedMode = stored.panelMode || "sidepanel";
+  await applyPanelMode(_cachedMode);
+});
+
+// onClicked must NOT await before calling sidePanel.open — use cached mode.
 chrome.action.onClicked.addListener((tab) => {
-  chrome.sidePanel.open({ windowId: tab.windowId });
+  _cachedSrcWindowId = tab.windowId;  // remember for SET_PANEL_MODE sidepanel switch
+  if (_cachedMode === "popup") {
+    openPopupWindow();
+  } else {
+    chrome.sidePanel.open({ windowId: tab.windowId });
+  }
 });
 
 async function getPageContent(tabId) {
@@ -251,6 +304,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const quota = await fetchPersonalQuota(message.apiKey);
         sendResponse({ ok: true, quota });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MESSAGE_TYPES.SET_PANEL_MODE) {
+    (async () => {
+      try {
+        const mode = message.mode === "popup" ? "popup" : "sidepanel";
+        _cachedMode = mode;  // update cache immediately
+
+        if (mode === "popup") {
+          // Save state, then open popup window; sidepanel.js will window.close() itself
+          await chrome.storage.local.set({ panelMode: mode });
+          await applyPanelMode(mode);
+          await openPopupWindow();
+          sendResponse({ ok: true });
+        } else {
+          // Open sidepanel FIRST to stay as close to the user gesture as possible.
+          // Use cached source windowId; fall back to getLastFocused if stale.
+          const winId = _cachedSrcWindowId
+            || (await chrome.windows.getLastFocused().catch(() => null))?.id;
+          if (winId) await chrome.sidePanel.open({ windowId: winId });
+          await chrome.storage.local.set({ panelMode: mode });
+          await applyPanelMode(mode);
+          sendResponse({ ok: true });
+          // Close popup window if tracked
+          if (_bgPopupWindowId !== null) {
+            try { await chrome.windows.remove(_bgPopupWindowId); } catch (e) {}
+            _bgPopupWindowId = null;
+          }
+        }
       } catch (err) {
         sendResponse({ ok: false, error: err.message || String(err) });
       }

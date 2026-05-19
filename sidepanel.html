@@ -45,7 +45,8 @@
     }
 
     .clear-btn,
-    .load-page-btn {
+    .load-page-btn,
+    .panel-mode-btn {
       padding: 6px 12px;
       background: transparent;
       border: 1px solid rgba(255, 255, 255, 0.35);
@@ -58,7 +59,8 @@
     }
 
     .clear-btn:hover,
-    .load-page-btn:hover {
+    .load-page-btn:hover,
+    .panel-mode-btn:hover {
       background: rgba(255, 255, 255, 0.2);
     }
 
@@ -139,11 +141,6 @@
       padding: 12px 16px;
       background: #fff;
       border-bottom: 1px solid #e5e7eb;
-      display: none;
-    }
-
-    .page-info.show {
-      display: block;
     }
 
     .page-title {
@@ -219,27 +216,104 @@
     }
 
     .message.assistant p {
-      margin: 8px 0;
+      margin: 0;
     }
 
-    .message.assistant p:first-child {
-      margin-top: 0;
+    .message.assistant ul,
+    .message.assistant ol {
+      margin: 4px 0;
+      padding-left: 20px;
     }
 
-    .message.assistant p:last-child {
-      margin-bottom: 0;
+    .message.assistant li {
+      margin: 2px 0;
     }
 
     .message.assistant code {
       background: #f3f4f6;
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
+      font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      color: #6d28d9;
+    }
+
+    .message.assistant pre {
+      background: #0b1020;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 4px 0;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .message.assistant pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
     }
 
     .message.assistant strong {
       font-weight: 600;
+    }
+
+    .message.assistant em {
+      font-style: italic;
+    }
+
+    .message.assistant h2 {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 8px 0 4px;
+      color: #5b21b6;
+    }
+
+    .message.assistant h3 {
+      font-size: 14px;
+      font-weight: 700;
+      margin: 6px 0 3px;
+      color: #6d28d9;
+    }
+
+    .message.assistant h2:first-child,
+    .message.assistant h3:first-child {
+      margin-top: 0;
+    }
+
+    .message.assistant .table-wrapper {
+      overflow-x: auto;
+      margin: 4px 0;
+    }
+
+    .message.assistant table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .message.assistant th,
+    .message.assistant td {
+      border: 1px solid #e5e7eb;
+      padding: 5px 10px;
+      text-align: left;
+    }
+
+    .message.assistant th {
+      background: #f3f4f6;
+      color: #374151;
+      font-weight: 600;
+    }
+
+    .message.assistant td {
+      color: #1f2937;
+    }
+
+    .message.assistant tr:nth-child(even) td {
+      background: #f9fafb;
     }
 
     .empty-state {
@@ -759,6 +833,11 @@
     .empty-prompts-text {
       font-size: 13px;
     }
+
+    /* Popup mode: window size/resize/drag handled by browser popup window */
+    body.popup-mode {
+      overflow: hidden;
+    }
   </style>
 </head>
 <body>
@@ -774,6 +853,7 @@
         <option value="zh-CN">簡</option>
         <option value="en">En</option>
       </select>
+      <button class="panel-mode-btn" id="panelModeBtn" title="切換顯示模式">⊞</button>
     </div>
   </div>
 
@@ -781,11 +861,6 @@
     <div class="status-bar">
       <span class="status-indicator" id="statusIndicator"></span>
       <span id="statusText" data-i18n="status-ready">準備就緒</span>
-    </div>
-
-    <div class="page-info" id="pageInfo">
-      <div class="page-title" id="pageTitle"></div>
-      <div class="page-url" id="pageUrl"></div>
     </div>
 
     <div class="chat-container">

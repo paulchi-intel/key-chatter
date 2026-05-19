@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
   language: "language",
   messages: "messages",
   pageContent: "pageContent",
-  savedPrompts: "savedPrompts"
+  savedPrompts: "savedPrompts",
+  panelMode: "panelMode"
 };
 
 const DEFAULT_MODEL = "gpt-4.1-mini";
@@ -61,7 +62,11 @@ const TRANSLATIONS = {
     "apikey-confirm": "確認",
     "apikey-updated": "API key 已更新",
     "apikey-required": "請先設定 API key",
-    "model-restricted-tag": "受限"
+    "model-restricted-tag": "受限",
+    "panel-mode-to-popup": "切換至彈窗",
+    "panel-mode-to-sidepanel": "切換至側欄",
+    "panel-mode-switched-popup": "已切換至彈窗模式，下次點擊圖示將開啟彈窗",
+    "panel-mode-switched-sidepanel": "已切換至側欄模式"
   },
   "zh-CN": {
     clear: "清除",
@@ -110,7 +115,11 @@ const TRANSLATIONS = {
     "apikey-confirm": "确认",
     "apikey-updated": "API key 已更新",
     "apikey-required": "请先设置 API key",
-    "model-restricted-tag": "受限"
+    "model-restricted-tag": "受限",
+    "panel-mode-to-popup": "切换至弹窗",
+    "panel-mode-to-sidepanel": "切换至侧栏",
+    "panel-mode-switched-popup": "已切换至弹窗模式，下次点击图标将开启弹窗",
+    "panel-mode-switched-sidepanel": "已切换至侧栏模式"
   },
   en: {
     clear: "Clear",
@@ -159,21 +168,23 @@ const TRANSLATIONS = {
     "apikey-confirm": "Confirm",
     "apikey-updated": "API key updated",
     "apikey-required": "Please set your API key first",
-    "model-restricted-tag": "Restricted"
+    "model-restricted-tag": "Restricted",
+    "panel-mode-to-popup": "Switch to Popup",
+    "panel-mode-to-sidepanel": "Switch to Side Panel",
+    "panel-mode-switched-popup": "Switched to popup mode. Next click on the icon will open a popup.",
+    "panel-mode-switched-sidepanel": "Switched to side panel mode."
   }
 };
 
 const UI = {
   headerTitle: document.getElementById("headerTitle"),
+  panelModeBtn: document.getElementById("panelModeBtn"),
   clearBtn: document.getElementById("clearBtn"),
   loadPageBtn: document.getElementById("loadPageBtn"),
   loadClipboardBtn: document.getElementById("loadClipboardBtn"),
   languageSelect: document.getElementById("languageSelect"),
   statusIndicator: document.getElementById("statusIndicator"),
   statusText: document.getElementById("statusText"),
-  pageInfo: document.getElementById("pageInfo"),
-  pageTitle: document.getElementById("pageTitle"),
-  pageUrl: document.getElementById("pageUrl"),
   messagesContainer: document.getElementById("messagesContainer"),
   messageInput: document.getElementById("messageInput"),
   sendBtn: document.getElementById("sendBtn"),
@@ -200,7 +211,8 @@ let state = {
   modelQuotas: {},
   messages: [],
   pageContent: null,
-  savedPrompts: []
+  savedPrompts: [],
+  panelMode: "sidepanel"
 };
 
 function t(key, params = {}) {
@@ -216,6 +228,73 @@ function escapeHtml(text) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function renderMarkdown(md) {
+  let html = md || "";
+
+  // 1. Fenced code blocks — escape HTML inside so code shows as-is
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+    const esc = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<pre><code>${esc}</code></pre>`;
+  });
+
+  // 2. Inline code — escape HTML inside
+  html = html.replace(/`([^`]+)`/g, (_m, code) => {
+    const esc = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<code>${esc}</code>`;
+  });
+
+  // 3. Bold / italic
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+  // 4. Headings (# treated same as ##)
+  html = html.replace(/^#{1,2} (.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+
+  // 5. Ordered list items (mark with attribute to distinguish from ul)
+  html = html.replace(/^\d+\. (.+)$/gm, "<li data-ol>$1</li>");
+
+  // 6. Unordered list items
+  html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+
+  // Group consecutive ordered-list items
+  html = html.replace(/(<li data-ol>[\s\S]*?<\/li>\n*)+/g,
+    (m) => `<ol>${m.replace(/ data-ol/g, "")}</ol>`);
+
+  // Group consecutive unordered-list items
+  html = html.replace(/(<li>[\s\S]*?<\/li>\n*)+/g, (m) => `<ul>${m}</ul>`);
+
+  // 7. Tables
+  html = html.replace(/((?:^\|[^\n]*(?:\n|$))+)/gm, (block) => {
+    const lines = block.trim().split("\n").filter((l) => l.trim().startsWith("|"));
+    if (lines.length < 3) return block;
+    const isSep = (l) => /^\|[\s\-:|]+\|/.test(l.trim());
+    if (!isSep(lines[1])) return block;
+    const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+    const headers = cells(lines[0]);
+    const rows = lines.slice(2).filter((l) => l.trim()).map(cells);
+    let tbl = '<div class="table-wrapper"><table><thead><tr>';
+    headers.forEach((h) => { tbl += `<th>${h}</th>`; });
+    tbl += "</tr></thead><tbody>";
+    rows.forEach((r) => {
+      tbl += "<tr>";
+      r.forEach((c) => { tbl += `<td>${c}</td>`; });
+      tbl += "</tr>";
+    });
+    tbl += "</tbody></table></div>";
+    return tbl;
+  });
+
+  // 8. Collapse all newlines → single <br>, no paragraph structure
+  html = html.replace(/\n+/g, "\n");
+  html = html.replace(/\n/g, "<br>");
+  // Remove <br> directly adjacent to block elements (they space themselves via CSS margin)
+  html = html.replace(/(<br>)+(<\/?(h[23]|li|[uo]l|pre|div)[^>]*>)/gi, "$2");
+  html = html.replace(/(<\/?(h[23]|li|[uo]l|pre|div)[^>]*>)(<br>)+/gi, "$1");
+
+  return html;
 }
 
 function updateUILanguage() {
@@ -244,6 +323,7 @@ function updateUILanguage() {
   });
 
   UI.languageSelect.value = state.currentLanguage;
+  updatePanelModeBtn();
 }
 
 function setStatus(type, text) {
@@ -355,15 +435,23 @@ async function ensureApiKey(forcePrompt = false) {
 }
 
 function showPageInfo(title, url) {
-  UI.pageTitle.textContent = title || "";
-  UI.pageUrl.textContent = url || "";
-  UI.pageInfo.classList.add("show");
+  let node = UI.messagesContainer.querySelector(".page-info");
+  if (node) {
+    node.querySelector(".page-title").textContent = title || "";
+    node.querySelector(".page-url").textContent = url || "";
+    return;
+  }
+  node = document.createElement("div");
+  node.className = "page-info";
+  node.innerHTML = "<div class=\"page-title\"></div><div class=\"page-url\"></div>";
+  node.querySelector(".page-title").textContent = title || "";
+  node.querySelector(".page-url").textContent = url || "";
+  UI.messagesContainer.prepend(node);
 }
 
 function hidePageInfo() {
-  UI.pageInfo.classList.remove("show");
-  UI.pageTitle.textContent = "";
-  UI.pageUrl.textContent = "";
+  const node = UI.messagesContainer.querySelector(".page-info");
+  if (node) node.remove();
 }
 
 function renderEmptyState() {
@@ -386,13 +474,7 @@ function addMessage(role, content) {
   node.className = `message ${role}`;
 
   if (role === "assistant") {
-    let html = escapeHtml(content || "");
-    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/`(.+?)`/g, "<code>$1</code>");
-    html = html.replace(/\n\n/g, "</p><p>");
-    html = html.replace(/\n/g, "<br>");
-    html = `<p>${html}</p>`.replace(/<p><\/p>/g, "");
-    node.innerHTML = html;
+    node.innerHTML = renderMarkdown(content || "");
   } else {
     node.textContent = content || "";
   }
@@ -541,7 +623,8 @@ async function saveState() {
     [STORAGE_KEYS.language]: state.currentLanguage,
     [STORAGE_KEYS.messages]: state.messages,
     [STORAGE_KEYS.pageContent]: state.pageContent,
-    [STORAGE_KEYS.savedPrompts]: state.savedPrompts
+    [STORAGE_KEYS.savedPrompts]: state.savedPrompts,
+    [STORAGE_KEYS.panelMode]: state.panelMode
   });
 }
 
@@ -552,7 +635,8 @@ async function initializeState() {
     STORAGE_KEYS.language,
     STORAGE_KEYS.messages,
     STORAGE_KEYS.pageContent,
-    STORAGE_KEYS.savedPrompts
+    STORAGE_KEYS.savedPrompts,
+    STORAGE_KEYS.panelMode
   ]);
 
   // Backward compatibility: migrate first valid key from legacy apiKeys[] storage.
@@ -568,6 +652,15 @@ async function initializeState() {
   state.messages = Array.isArray(stored[STORAGE_KEYS.messages]) ? stored[STORAGE_KEYS.messages] : [];
   state.pageContent = stored[STORAGE_KEYS.pageContent] || null;
   state.savedPrompts = Array.isArray(stored[STORAGE_KEYS.savedPrompts]) ? stored[STORAGE_KEYS.savedPrompts] : [];
+  state.panelMode = stored[STORAGE_KEYS.panelMode] || "sidepanel";
+
+  // Apply popup-mode CSS class
+  if (state.panelMode === "popup") {
+    document.body.classList.add("popup-mode");
+  } else {
+    document.body.classList.remove("popup-mode");
+  }
+  updatePanelModeBtn();
 
   renderModelOptions();
   renderMessages();
@@ -578,6 +671,40 @@ async function initializeState() {
 
   updateUILanguage();
   await saveState();
+}
+
+function updatePanelModeBtn() {
+  if (!UI.panelModeBtn) return;
+  if (state.panelMode === "popup") {
+    UI.panelModeBtn.textContent = "◫";
+    UI.panelModeBtn.title = t("panel-mode-to-sidepanel");
+  } else {
+    UI.panelModeBtn.textContent = "⊞";
+    UI.panelModeBtn.title = t("panel-mode-to-popup");
+  }
+}
+
+async function togglePanelMode() {
+  const newMode = state.panelMode === "popup" ? "sidepanel" : "popup";
+  state.panelMode = newMode;
+
+  if (newMode === "popup") {
+    document.body.classList.add("popup-mode");
+  } else {
+    document.body.classList.remove("popup-mode");
+  }
+
+  updatePanelModeBtn();
+  await saveState();
+
+  const response = await sendRuntimeMessage({ type: "SET_PANEL_MODE", mode: newMode });
+  if (response?.ok) {
+    // For sidepanel: background opened it, close this popup.
+    // For popup: background closed the sidepanel, but try window.close() as well.
+    window.close();
+  } else {
+    setStatus("error", response?.error || "Mode switch failed");
+  }
 }
 
 function showQuickQuestions() {
@@ -832,7 +959,12 @@ async function loadPageContent() {
   setStatus("loading", t("status-loading-page"));
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    // In popup mode the current window is the extension popup (no real tabs),
+    // so query all windows and pick the active tab from a normal browser window.
+    const allTabs = await chrome.tabs.query({ active: true });
+    const tab = allTabs.find(t => !t.url?.startsWith("chrome-extension://"))
+             || allTabs.find(t => t.windowType !== "popup")
+             || allTabs[0];
     if (!tab?.id) {
       setStatus("error", t("error-no-tab"));
       return;
@@ -1060,6 +1192,7 @@ function setupEventHandlers() {
     await saveState();
   });
 
+  UI.panelModeBtn.addEventListener("click", togglePanelMode);
   UI.loadPageBtn.addEventListener("click", loadPageContent);
   UI.loadClipboardBtn.addEventListener("click", loadClipboardContent);
   UI.clearBtn.addEventListener("click", clearConversation);

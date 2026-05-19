@@ -1,20 +1,23 @@
 # Key Chatter
 
-Chrome extension side panel supporting both ExpertGPT and GNAI API keys.
+Chrome extension supporting both ExpertGPT and GNAI API keys, with a side panel and a floating popup window mode.
 
 ## GitHub Description
 
-Key Chatter is a Chrome side panel extension supporting ExpertGPT and GNAI APIs, with webpage/clipboard context chat, OpenAI + Anthropic model selection, and built-in multilingual prompts.
+Key Chatter is a Chrome extension supporting ExpertGPT and GNAI APIs, with webpage/clipboard context chat, OpenAI + Anthropic model selection, built-in multilingual prompts, and a switchable side panel / floating popup UI.
 
 ## Features
 
+- **Dual display mode** — toggle between side panel (anchored to the browser) and a floating popup window (movable and resizable by the OS) using the ⊞/◫ button at the far right of the header; preference is persisted across sessions
 - **Single-panel chat UI** — no tabs, just chat
+- **Markdown rendering** — assistant replies render bold, italic, headings, bullet/numbered lists, inline code, fenced code blocks, and tables; blank lines and list spacing are kept minimal
 - **Dual API key support** — accepts both ExpertGPT (`pak_...`) and GNAI keys; the model list and chat endpoint are automatically routed based on the key type
 - **Model selector** — groups shown as `--- OpenAI ---` and `--- Anthropic ---`
   - **ExpertGPT key**: models fetched dynamically from the API; quota displayed as `(used/limit)` per model
   - **GNAI key**: fixed model list (no quota display); OpenAI models: `gpt-4o`, `gpt-4.1`, `gpt-5-mini`, `gpt-5-nano`, `o3-mini`; Anthropic models: `claude-4-6-opus`, `claude-4-6-sonnet`, `claude-4-5-opus`, `claude-4-5-sonnet`, `claude-4-5-haiku`
 - **Automatic endpoint routing** — Anthropic models route to the Anthropic endpoint; OpenAI-compatible models route to the OpenAI endpoint; each key type uses its own base URL
-- **Header controls** — Clear / Load Page / Load Clipboard / model dropdown / language selector (繁/簡/En)
+- **Header controls** — Clear / Load Page / Load Clipboard / model dropdown / language selector (繁/簡/En) / panel-mode toggle (⊞/◫)
+- **Page info in chat** — after loading a page or clipboard, the source title and URL appear inside the message area above the quick questions
 - **Quick Questions** — appears after loading page/clipboard content; one-click summary templates
 - **Saved Prompts** — manage reusable prompt snippets, accessible from the chat panel
 - **i18n** — full UI in Traditional Chinese, Simplified Chinese, and English
@@ -33,7 +36,7 @@ To change the key later, click **🔑 Key Chatter** in the header.
 
 ## How to use
 
-1. Open the side panel.
+1. Open the side panel (click the extension icon).
 2. Enter your API key when prompted (first launch only) — either an ExpertGPT `pak_...` key or a GNAI key.
 3. The model list loads automatically based on your key type.
 4. Select a model from the header dropdown.
@@ -41,6 +44,7 @@ To change the key later, click **🔑 Key Chatter** in the header.
 6. Use **Quick Questions** for one-click summaries after loading content.
 7. Use **Saved Prompts** to store and reuse common prompts.
 8. Ask questions normally in the chat box.
+9. To switch to floating popup mode, click **⊞** at the right end of the header; click **◫** inside the popup to switch back.
 
 ## Delivery Notes
 
@@ -49,6 +53,9 @@ To change the key later, click **🔑 Key Chatter** in the header.
 - For ExpertGPT keys, per-model quota is fetched from `/v1/quota` and shown in the selector. GNAI keys skip this step.
 - Anthropic models always route to the Anthropic-format endpoint (`/v1/messages`); OpenAI-compatible models route to `/chat/completions`.
 - Legacy `apiKeys[]` data is auto-migrated to single-key mode at startup.
+- **Panel mode** is stored in `chrome.storage.local` as `panelMode` (`"sidepanel"` or `"popup"`). The service worker caches it in memory (`_cachedMode`) so the `chrome.action.onClicked` handler never needs an async call before `sidePanel.open()`.
+- **Popup mode** uses `chrome.windows.create({ type: "popup", width: 640, height: 600 })` — a real browser window that can be moved and resized by the OS natively. Re-clicking the extension icon focuses the existing popup instead of opening a second one.
+- **Load Page** queries active tabs across all windows and skips extension-origin URLs, so it works correctly in both sidepanel and popup modes.
 
 ## Release Checklist
 
@@ -64,14 +71,16 @@ To change the key later, click **🔑 Key Chatter** in the header.
    - Both OpenAI and Anthropic model groups appear.
    - Chat works with both OpenAI and Anthropic models.
 5. Verify chat works in all 3 languages (繁/簡/En).
-6. Verify `Load Page` and `Load Clipboard` both produce context-aware answers.
+6. Verify `Load Page` and `Load Clipboard` both produce context-aware answers (test in both sidepanel and popup modes).
 7. Verify Saved Prompts add/delete/use flows.
-8. Re-check extension permissions in `chrome://extensions` before packaging.
+8. Verify panel-mode toggle: sidepanel → popup (⊞) opens floating window and closes sidepanel; popup → sidepanel (◫) opens sidepanel and closes popup.
+9. Verify markdown rendering: bold, italic, headings, lists, code blocks, tables all render correctly in assistant replies.
+10. Re-check extension permissions in `chrome://extensions` before packaging.
 
 ## Files
 
-- `manifest.json`: extension manifest (MV3)
-- `background.js`: service worker — API bridge; routes requests to ExpertGPT or GNAI endpoints based on key type; supports `/v1/models`, `/anthropic/v1/models`, `/chat/completions`, `/v1/messages` (Anthropic format), `/v1/quota`
-- `sidepanel.html`: single-panel UI structure and CSS
-- `sidepanel.js`: all UI logic — chat, API key modal/validation, model list rendering (with/without quota), quick questions, saved prompts, i18n
+- `manifest.json`: extension manifest (MV3); permissions include `sidePanel`, `windows`, `activeTab`, `scripting`, `storage`, `clipboardRead`
+- `background.js`: service worker — API bridge; routes requests to ExpertGPT or GNAI endpoints; handles `SET_PANEL_MODE` (creates popup window or opens sidepanel); caches `_cachedMode` and `_cachedSrcWindowId` for gesture-safe `sidePanel.open()` calls
+- `sidepanel.html`: UI structure and CSS for both sidepanel and popup modes
+- `sidepanel.js`: all UI logic — chat, markdown rendering (`renderMarkdown`), API key modal/validation, model list rendering (with/without quota), quick questions, saved prompts, panel-mode toggle, i18n
 - `options.html`: static info page
