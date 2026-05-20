@@ -849,13 +849,20 @@ function renderTabBar() {
   const bar = document.getElementById("tabBar");
   if (!bar) return;
   bar.innerHTML = "";
+
+  let dragSrcId = null;
+
   tabs.forEach(tab => {
     const btn = document.createElement("button");
     btn.className = "tab-item" + (tab.id === state.activeTabId ? " active" : "");
+    btn.draggable = true;
+    btn.dataset.tabId = tab.id;
+
     const label = document.createElement("span");
     label.className = "tab-label";
     label.textContent = getTabLabel(tab);
     btn.appendChild(label);
+
     if (tabs.length > 1) {
       const close = document.createElement("span");
       close.className = "tab-close";
@@ -863,9 +870,42 @@ function renderTabBar() {
       close.addEventListener("click", e => { e.stopPropagation(); closeTab(tab.id); });
       btn.appendChild(close);
     }
+
     btn.addEventListener("click", () => switchTab(tab.id));
+
+    // ── Drag-and-drop reorder ──
+    btn.addEventListener("dragstart", e => {
+      dragSrcId = tab.id;
+      e.dataTransfer.effectAllowed = "move";
+      btn.classList.add("dragging");
+    });
+    btn.addEventListener("dragend", () => {
+      btn.classList.remove("dragging");
+      bar.querySelectorAll(".tab-item").forEach(b => b.classList.remove("drag-over"));
+    });
+    btn.addEventListener("dragover", e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (dragSrcId !== tab.id) btn.classList.add("drag-over");
+    });
+    btn.addEventListener("dragleave", () => btn.classList.remove("drag-over"));
+    btn.addEventListener("drop", e => {
+      e.preventDefault();
+      btn.classList.remove("drag-over");
+      if (dragSrcId === null || dragSrcId === tab.id) return;
+      commitActiveTab();
+      const srcIdx  = tabs.findIndex(t => t.id === dragSrcId);
+      const destIdx = tabs.findIndex(t => t.id === tab.id);
+      if (srcIdx === -1 || destIdx === -1) return;
+      const [moved] = tabs.splice(srcIdx, 1);
+      tabs.splice(destIdx, 0, moved);
+      renderTabBar();
+      saveState();
+    });
+
     bar.appendChild(btn);
   });
+
   const addBtn = document.createElement("button");
   addBtn.className = "tab-add";
   addBtn.textContent = "+";
