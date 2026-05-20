@@ -910,7 +910,18 @@ async function switchTab(id) {
 async function closeTab(id) {
   const idx = tabs.findIndex(t => t.id === id);
   if (idx === -1) return;
-  if (id === state.activeTabId && state.messages.length > 0 && !state.sessionSaved) {
+
+  // Determine whether this tab has unsaved content.
+  // For the active tab use state.* (may have uncommitted changes);
+  // for non-active tabs read directly from tabs[].
+  const isActive = id === state.activeTabId;
+  const tabData  = isActive ? state : tabs[idx];
+  const hasUnsaved = tabData.messages.length > 0 && !tabData.sessionSaved;
+
+  if (hasUnsaved) {
+    // Switch to the tab so the user can see what they're being asked to save,
+    // and so that downloadSession() operates on the correct content.
+    if (!isActive) await switchTab(id);
     const choice = await showConfirmSaveDialog();
     if (choice === "cancel") return;
     if (choice === "yes") await downloadSession();
