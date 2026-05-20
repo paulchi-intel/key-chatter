@@ -882,6 +882,12 @@ function getTabLabel(tab) {
     const title = tab.pageContent.title.trim();
     return title.length > 14 ? title.slice(0, 14) + "\u2026" : title;
   }
+  // No page loaded — use the first user message as the label
+  const firstUser = tab.messages?.find(m => m.role === "user");
+  if (firstUser?.content) {
+    const text = firstUser.content.trim().replace(/\s+/g, " ");
+    return text.length > 14 ? text.slice(0, 14) + "\u2026" : text;
+  }
   return t("empty-tab-label");
 }
 
@@ -1215,6 +1221,7 @@ async function sendMessage() {
       }
       incrementModelUsage(state.selectedModel);
       await saveState();
+      renderTabBar();
       setStatus("ready", t("status-ready"));
       return;
     }
@@ -1225,6 +1232,7 @@ async function sendMessage() {
     state.sessionSaved = false;
     incrementModelUsage(state.selectedModel);
     await saveState();
+    renderTabBar();
 
     if (state.pageContent) {
       showQuickQuestions();
