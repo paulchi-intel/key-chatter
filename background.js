@@ -366,18 +366,39 @@ async function getPageContent(tabId) {
           };
 
           const collectSegments = () => {
+            // Prefer the segment-renderer element itself so we can pull both
+            // timestamp and text from each segment.
+            const renderers = document.querySelectorAll("ytd-transcript-segment-renderer");
+            if (renderers.length > 0) {
+              return { segs: renderers, sel: "ytd-transcript-segment-renderer", structured: true };
+            }
             for (const sel of SEG_SELECTORS) {
               const found = document.querySelectorAll(sel);
-              if (found.length > 0) return { segs: found, sel };
+              if (found.length > 0) return { segs: found, sel, structured: false };
             }
-            return { segs: [], sel: "" };
+            return { segs: [], sel: "", structured: false };
           };
 
           const extractText = () => {
-            const { segs, sel } = collectSegments();
+            const { segs, sel, structured } = collectSegments();
             if (segs.length > 0) {
-              const lines = [...segs].map(s => (s.textContent || "").trim()).filter(Boolean);
-              return { text: lines.join("\n"), via: `segs:${sel}` };
+              const lines = [...segs].map(s => {
+                if (structured) {
+                  // Pull "[mm:ss] text" pairs from each segment renderer
+                  const tsEl =
+                    s.querySelector(".segment-timestamp, div.segment-timestamp") ||
+                    s.querySelector('[class*="timestamp"]');
+                  const txtEl =
+                    s.querySelector(".segment-text, yt-formatted-string.segment-text, div.segment-text") ||
+                    s.querySelector('[class*="segment-text"]');
+                  const ts = (tsEl?.textContent || "").trim();
+                  const txt = (txtEl?.textContent || s.textContent || "").trim();
+                  if (!txt) return "";
+                  return ts ? `[${ts}] ${txt}` : txt;
+                }
+                return (s.textContent || "").trim();
+              }).filter(Boolean);
+              if (lines.length > 0) return { text: lines.join("\n"), via: `segs:${sel}` };
             }
             // Panel-level fallback
             const panel = document.querySelector(PANEL_SELECTOR);
