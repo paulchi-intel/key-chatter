@@ -5,7 +5,7 @@ const OPENAI_BASE_URL = "https://expertgpt.intel.com/v1";
 const ANTHROPIC_BASE_URL = "https://expertgpt.intel.com/anthropic/v1";
 const GNAI_OPENAI_BASE_URL = "https://gnai.intel.com/api/providers/openai/v1";
 const GNAI_ANTHROPIC_BASE_URL = "https://gnai.intel.com/api/providers/anthropic";
-const REQUEST_TIMEOUT_MS = 20000;
+const REQUEST_TIMEOUT_MS = 30000;
 
 const GNAI_OPENAI_MODELS = ["gpt-4o", "gpt-4.1", "gpt-5-mini", "gpt-5-nano", "o3-mini"];
 const GNAI_ANTHROPIC_MODELS = ["claude-4-6-opus", "claude-4-6-sonnet", "claude-4-5-opus", "claude-4-5-sonnet", "claude-4-5-haiku"];
