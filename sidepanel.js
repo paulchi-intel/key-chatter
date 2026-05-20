@@ -1327,12 +1327,18 @@ async function loadPageContent() {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       tab = tabs[0];
     } else {
-      // Popup mode
-      const allTabs = await chrome.tabs.query({ active: true });
-      tab = allTabs.find(t => !t.url?.startsWith("chrome-extension://"))
-         || allTabs.find(t => t.windowType !== "popup")
-         || allTabs[0];
+      // Popup mode — prefer the source browser window (the one user clicked from)
+      const srcTabs = await chrome.tabs.query({ active: true, windowId: POPUP_SRC_WINDOW_ID });
+      tab = srcTabs.find(t => !t.url?.startsWith("chrome-extension://")) || srcTabs[0];
+      if (!tab) {
+        // Fallback: any active non-extension tab
+        const allTabs = await chrome.tabs.query({ active: true });
+        tab = allTabs.find(t => !t.url?.startsWith("chrome-extension://"))
+           || allTabs.find(t => t.windowType !== "popup")
+           || allTabs[0];
+      }
     }
+    console.log("[KC] loadPageContent target tab:", { id: tab?.id, url: tab?.url, windowId: tab?.windowId, mode: POPUP_SRC_WINDOW_ID === null ? "sidepanel" : "popup" });
     if (!tab?.id) {
       setStatus("error", t("error-no-tab"));
       return;

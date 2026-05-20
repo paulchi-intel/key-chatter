@@ -313,6 +313,27 @@ async function getPageContent(tabId) {
   // Step 2b: Last-resort fallback — open YouTube's own transcript panel via DOM
   // and scrape the segment text. Works even for ASR/signed-URL cases.
   if (isYouTube) {
+    // In popup mode the extension popup window may occlude the YouTube tab,
+    // causing Chrome to throttle the tab's rendering and ignore programmatic
+    // clicks. Briefly bring the YouTube window to the foreground (we restore
+    // the previously focused window afterwards so the user's popup/sidepanel
+    // doesn't lose context).
+    let prevFocusedWindowId = null;
+    let ytWindowId = null;
+    try {
+      const tabInfo = await chrome.tabs.get(tabId);
+      ytWindowId = tabInfo?.windowId ?? null;
+      const focused = await chrome.windows.getLastFocused({ populate: false }).catch(() => null);
+      prevFocusedWindowId = focused?.id ?? null;
+      if (ytWindowId && ytWindowId !== prevFocusedWindowId) {
+        await chrome.windows.update(ytWindowId, { focused: true }).catch(() => {});
+        // Give the renderer a moment to un-throttle.
+        await new Promise(r => setTimeout(r, 250));
+      }
+    } catch (e) {
+      console.log("[KC] focus pre-step failed:", e?.message || e);
+    }
+
     try {
       console.log("[KC] trying DOM transcript scrape");
       const [{ result: domResult }] = await chrome.scripting.executeScript({
@@ -384,14 +405,26 @@ async function getPageContent(tabId) {
 
           // Otherwise, find and click the "Show transcript" button.
 
+          // YouTube's Polymer/lit elements often ignore bare .click() — dispatch a
+          // full pointer/mouse sequence to better simulate a real user click.
+          const fireClick = (el) => {
+            const opts = { bubbles: true, cancelable: true, composed: true, view: window, button: 0 };
+            try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch {}
+            try { el.dispatchEvent(new MouseEvent("mousedown", opts)); } catch {}
+            try { el.dispatchEvent(new PointerEvent("pointerup", opts)); } catch {}
+            try { el.dispatchEvent(new MouseEvent("mouseup", opts)); } catch {}
+            try { el.dispatchEvent(new MouseEvent("click", opts)); } catch {}
+            try { if (typeof el.click === "function") el.click(); } catch {}
+          };
+
           // Try description-area button first (most reliable on modern desktop YT)
           const tryClickButton = async () => {
             // Expand description if collapsed
             const expand = document.querySelector("#expand, tp-yt-paper-button#expand");
             if (expand && expand.offsetParent !== null) {
-              expand.click();
+              fireClick(expand);
               dbg.steps.push("expanded");
-              await sleep(400);
+              await sleep(500);
             }
 
             // Specific button in description's transcript section
@@ -400,7 +433,9 @@ async function getPageContent(tabId) {
               "ytd-video-description-transcript-section-renderer yt-button-shape button"
             );
             if (inDescBtn) {
-              inDescBtn.click();
+              // scroll into view so click event geometry is valid
+              try { inDescBtn.scrollIntoView({ block: "center" }); } catch {}
+              fireClick(inDescBtn);
               dbg.steps.push("descBtnClicked");
               return true;
             }
@@ -417,7 +452,8 @@ async function getPageContent(tabId) {
               const label = (el.getAttribute("aria-label") || "") + " " + (el.textContent || "");
               if (hideRe.test(label)) continue;
               if (showRe.test(label)) {
-                el.click();
+                try { el.scrollIntoView({ block: "center" }); } catch {}
+                fireClick(el);
                 dbg.steps.push("genericBtnClicked");
                 return true;
               }
@@ -429,7 +465,7 @@ async function getPageContent(tabId) {
               "ytd-menu-renderer #button button"
             );
             if (moreBtn) {
-              moreBtn.click();
+              fireClick(moreBtn);
               dbg.steps.push("moreClicked");
               await sleep(500);
               for (const el of document.querySelectorAll(
@@ -437,7 +473,7 @@ async function getPageContent(tabId) {
               )) {
                 const label = (el.getAttribute("aria-label") || "") + " " + (el.textContent || "");
                 if (showRe.test(label)) {
-                  el.click();
+                  fireClick(el);
                   dbg.steps.push("menuItemClicked");
                   return true;
                 }
@@ -449,11 +485,31 @@ async function getPageContent(tabId) {
           const clicked = await tryClickButton();
           if (!clicked) { dbg.steps.push("noBtn"); return { dbg, error: "transcript button not found" }; }
 
-          // Poll for panel + content
+          // Poll for panel + content. Also try to force panel visibility if it
+          // exists in DOM but didn't expand (some YT builds need the attribute).
+          let forcedVisibility = false;
           for (let i = 0; i < 60; i++) {
             await sleep(200);
             const r = extractText();
             if (r.text) { dbg.steps.push(r.via); return { text: r.text, lang: "", dbg }; }
+
+            // Half-way through, try forcing the panel to expand
+            if (i === 15 && !forcedVisibility) {
+              const panel = document.querySelector(PANEL_SELECTOR);
+              if (panel) {
+                const v = panel.getAttribute("visibility") || "";
+                dbg.steps.push("panelExists:" + v);
+                if (!/EXPANDED/i.test(v)) {
+                  try {
+                    panel.setAttribute("visibility", "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED");
+                    dbg.steps.push("forcedExpand");
+                    forcedVisibility = true;
+                  } catch {}
+                }
+              } else {
+                dbg.steps.push("panelMissingAt3s");
+              }
+            }
           }
 
           // Final fallback: button was clicked successfully, so the transcript panel
@@ -461,11 +517,18 @@ async function getPageContent(tabId) {
           // innerText now includes the transcript content — return it and mark as
           // a successful transcript load.
           dbg.steps.push("clickedButSelectorMissed");
+          // Record final panel state for diagnostics
+          const finalPanel = document.querySelector(PANEL_SELECTOR);
+          dbg.steps.push("finalPanel:" + (finalPanel ? (finalPanel.getAttribute("visibility") || "noVisAttr") : "missing"));
           const bodyText = (document.body?.innerText || "").trim();
-          if (bodyText.length > 0) {
+          // Quality check: a real transcript-bearing body has substantial text.
+          // Tiny snippets like "Sign in\n0:10 / 7:39\nGoogle" mean the panel
+          // never actually opened (likely due to tab being throttled/occluded).
+          if (bodyText.length >= 500) {
             return { text: bodyText, lang: "", dbg, fromBodyInnerText: true };
           }
-          return { dbg, error: "no content after click" };
+          dbg.steps.push("bodyTextTooShort:" + bodyText.length);
+          return { dbg, error: "panel did not open after click" };
         }
       });
 
@@ -486,6 +549,11 @@ async function getPageContent(tabId) {
       }
     } catch (e) {
       console.error("[KC] DOM transcript error:", e);
+    } finally {
+      // Restore focus to whatever window was focused before (popup/sidepanel host)
+      if (prevFocusedWindowId && ytWindowId && prevFocusedWindowId !== ytWindowId) {
+        chrome.windows.update(prevFocusedWindowId, { focused: true }).catch(() => {});
+      }
     }
   }
 
