@@ -73,6 +73,9 @@ const TRANSLATIONS = {
     "confirm-save-before-clear": "對話尚未儲存，是否要先儲存？",
     "system-youtube-transcript-loaded": "已載入 YouTube 字幕",
     "status-youtube-transcript-loaded": "YouTube 字幕已載入",
+    "status-youtube-no-transcript": "此影片未提供字幕，已改載入頁面文字",
+    "transcript-show": "▶ 顯示字幕",
+    "transcript-hide": "▼ 隱藏字幕",
     "dialog-yes": "是",
     "dialog-no": "否",
     "dialog-cancel": "取消",
@@ -137,6 +140,9 @@ const TRANSLATIONS = {
     "confirm-save-before-clear": "对话尚未保存，是否要先保存？",
     "system-youtube-transcript-loaded": "已载入 YouTube 字幕",
     "status-youtube-transcript-loaded": "YouTube 字幕已载入",
+    "status-youtube-no-transcript": "此影片未提供字幕，已改载入页面文字",
+    "transcript-show": "▶ 显示字幕",
+    "transcript-hide": "▼ 隐藏字幕",
     "dialog-yes": "是",
     "dialog-no": "否",
     "dialog-cancel": "取消",
@@ -201,6 +207,9 @@ const TRANSLATIONS = {
     "confirm-save-before-clear": "Session not saved. Save before clearing?",
     "system-youtube-transcript-loaded": "YouTube transcript loaded",
     "status-youtube-transcript-loaded": "YouTube transcript loaded",
+    "status-youtube-no-transcript": "No transcript available; loaded page text instead",
+    "transcript-show": "▶ Show Transcript",
+    "transcript-hide": "▼ Hide Transcript",
     "dialog-yes": "Yes",
     "dialog-no": "No",
     "dialog-cancel": "Cancel",
@@ -520,11 +529,31 @@ async function ensureApiKey(forcePrompt = false) {
   return promptForApiKey(true);
 }
 
-function showPageInfo(title, url) {
+function _appendTranscriptToggle(node, transcript) {
+  const toggle = document.createElement("div");
+  toggle.className = "transcript-toggle";
+  toggle.textContent = t("transcript-show");
+  const panel = document.createElement("div");
+  panel.className = "transcript-panel";
+  panel.textContent = transcript;
+  toggle.addEventListener("click", () => {
+    const visible = panel.classList.toggle("visible");
+    toggle.textContent = t(visible ? "transcript-hide" : "transcript-show");
+  });
+  node.appendChild(toggle);
+  node.appendChild(panel);
+}
+
+function showPageInfo(title, url, transcript = null) {
   let node = UI.messagesContainer.querySelector(".page-info");
   if (node) {
     node.querySelector(".page-title").textContent = title || "";
     node.querySelector(".page-url").textContent = url || "";
+    const oldToggle = node.querySelector(".transcript-toggle");
+    const oldPanel  = node.querySelector(".transcript-panel");
+    if (oldToggle) oldToggle.remove();
+    if (oldPanel)  oldPanel.remove();
+    if (transcript) _appendTranscriptToggle(node, transcript);
     return;
   }
   node = document.createElement("div");
@@ -532,6 +561,7 @@ function showPageInfo(title, url) {
   node.innerHTML = "<div class=\"page-title\"></div><div class=\"page-url\"></div>";
   node.querySelector(".page-title").textContent = title || "";
   node.querySelector(".page-url").textContent = url || "";
+  if (transcript) _appendTranscriptToggle(node, transcript);
   UI.messagesContainer.prepend(node);
 }
 
@@ -786,7 +816,11 @@ async function initializeState() {
   renderMessages();
 
   if (state.pageContent) {
-    showPageInfo(state.pageContent.title, state.pageContent.url);
+    showPageInfo(
+      state.pageContent.title,
+      state.pageContent.url,
+      state.pageContent.isYouTubeTranscript ? state.pageContent.text : null
+    );
   }
 
   updateUILanguage();
@@ -948,7 +982,11 @@ async function switchTab(id) {
   renderTabBar();
   renderMessages();
   UI.modelSelect.value = state.selectedModel;
-  if (state.pageContent) showPageInfo(state.pageContent.title, state.pageContent.url);
+  if (state.pageContent) showPageInfo(
+    state.pageContent.title,
+    state.pageContent.url,
+    state.pageContent.isYouTubeTranscript ? state.pageContent.text : null
+  );
   else hidePageInfo();
   await saveState();
 }
@@ -988,7 +1026,11 @@ async function closeTab(id) {
   renderTabBar();
   renderMessages();
   UI.modelSelect.value = state.selectedModel;
-  if (state.pageContent) showPageInfo(state.pageContent.title, state.pageContent.url);
+  if (state.pageContent) showPageInfo(
+    state.pageContent.title,
+    state.pageContent.url,
+    state.pageContent.isYouTubeTranscript ? state.pageContent.text : null
+  );
   else hidePageInfo();
   await saveState();
 }
@@ -1276,12 +1318,21 @@ async function loadPageContent() {
   setStatus("loading", t("status-loading-page"));
 
   try {
-    // In popup mode the current window is the extension popup (no real tabs),
-    // so query all windows and pick the active tab from a normal browser window.
-    const allTabs = await chrome.tabs.query({ active: true });
-    const tab = allTabs.find(t => !t.url?.startsWith("chrome-extension://"))
-             || allTabs.find(t => t.windowType !== "popup")
-             || allTabs[0];
+    // In sidepanel mode, currentWindow gives the active tab in the host browser window.
+    // In popup mode the "current window" is the extension popup, so we query all windows
+    // and filter out chrome-extension:// tabs.
+    let tab;
+    if (POPUP_SRC_WINDOW_ID === null) {
+      // Sidepanel mode
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      tab = tabs[0];
+    } else {
+      // Popup mode
+      const allTabs = await chrome.tabs.query({ active: true });
+      tab = allTabs.find(t => !t.url?.startsWith("chrome-extension://"))
+         || allTabs.find(t => t.windowType !== "popup")
+         || allTabs[0];
+    }
     if (!tab?.id) {
       setStatus("error", t("error-no-tab"));
       return;
@@ -1298,7 +1349,11 @@ async function loadPageContent() {
     renderEmptyState();
 
     state.pageContent = response.content;
-    showPageInfo(state.pageContent.title, state.pageContent.url);
+    showPageInfo(
+      state.pageContent.title,
+      state.pageContent.url,
+      state.pageContent.isYouTubeTranscript ? state.pageContent.text : null
+    );
     const sysMsg = state.pageContent.isYouTubeTranscript
       ? t("system-youtube-transcript-loaded")
       : t("system-page-loaded");
@@ -1308,9 +1363,14 @@ async function loadPageContent() {
     renderTabBar();
 
     await saveState();
-    const statusMsg = state.pageContent.isYouTubeTranscript
-      ? t("status-youtube-transcript-loaded")
-      : t("status-page-loaded");
+    let statusMsg;
+    if (state.pageContent.isYouTubeTranscript) {
+      statusMsg = t("status-youtube-transcript-loaded");
+    } else if (state.pageContent.isYouTubeNoTranscript) {
+      statusMsg = t("status-youtube-no-transcript");
+    } else {
+      statusMsg = t("status-page-loaded");
+    }
     setStatus("ready", statusMsg);
   } catch (err) {
     state.pageContent = null;

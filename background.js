@@ -93,8 +93,30 @@ chrome.action.onClicked.addListener((tab) => {
   }
 });
 
+// Extract captionTracks array from an HTML/JS text blob using bracket-depth counting
+function _extractCaptionTracksFromText(text) {
+  const ctIdx = text.indexOf('"captionTracks":');
+  if (ctIdx === -1) return null;
+  const arrayStart = text.indexOf('[', ctIdx);
+  if (arrayStart === -1) return null;
+  let depth = 0, end = -1;
+  for (let i = arrayStart; i < text.length && end === -1; i++) {
+    const c = text[i];
+    if (c === '[' || c === '{') depth++;
+    else if (c === ']' || c === '}') { depth--; if (depth === 0) end = i + 1; }
+  }
+  if (end === -1) return null;
+  try {
+    const parsed = JSON.parse(text.substring(arrayStart, end));
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map(t => ({ baseUrl: t.baseUrl, languageCode: t.languageCode, kind: t.kind || "" }));
+    }
+  } catch (_) {}
+  return null;
+}
+
 async function getPageContent(tabId) {
-  // Step 1: Sync extraction in MAIN world — access ytInitialPlayerResponse
+  // Step 1: Get URL + title via MAIN world; also try ytInitialPlayerResponse + script tags
   const [{ result: pageInfo }] = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -104,56 +126,366 @@ async function getPageContent(tabId) {
       let captionTracks = null;
       if (/youtube\.com\/watch/.test(url)) {
         try {
-          const tracks = window.ytInitialPlayerResponse
-            ?.captions
-            ?.playerCaptionsTracklistRenderer
-            ?.captionTracks;
+          // Primary: window.ytInitialPlayerResponse
+          let tracks = window.ytInitialPlayerResponse
+            ?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+          // Secondary: inline <script> tags
+          if (!Array.isArray(tracks) || tracks.length === 0) {
+            for (const s of document.scripts) {
+              if (s.src || !s.textContent.includes('"captionTracks"')) continue;
+              const idx = s.textContent.indexOf('"captionTracks":');
+              if (idx === -1) continue;
+              const bs = s.textContent.indexOf('[', idx);
+              if (bs === -1) continue;
+              let d = 0, e2 = -1;
+              for (let i = bs; i < s.textContent.length && e2 === -1; i++) {
+                const c = s.textContent[i];
+                if (c === '[' || c === '{') d++;
+                else if (c === ']' || c === '}') { d--; if (d === 0) e2 = i + 1; }
+              }
+              if (e2 !== -1) {
+                try { tracks = JSON.parse(s.textContent.substring(bs, e2)); } catch (_) {}
+                if (Array.isArray(tracks) && tracks.length) break;
+              }
+            }
+          }
           if (Array.isArray(tracks) && tracks.length > 0) {
-            // Serialize only needed fields so the result is safely transferable
             captionTracks = tracks.map(t => ({
-              baseUrl: t.baseUrl,
-              languageCode: t.languageCode,
-              kind: t.kind || ""
+              baseUrl: t.baseUrl, languageCode: t.languageCode, kind: t.kind || ""
             }));
           }
-        } catch (_e) {}
+        } catch (_) {}
       }
       return { url, title, captionTracks };
     }
   });
 
-  // Step 2: If YouTube captions found, fetch transcript from service worker
-  if (Array.isArray(pageInfo?.captionTracks) && pageInfo.captionTracks.length > 0) {
+  let captionTracks = pageInfo?.captionTracks ?? null;
+  const isYouTube = /youtube\.com\/watch/.test(pageInfo?.url || "");
+
+  // Step 1b: HTML fetch fallback — service worker fetches the page directly and parses captionTracks
+  // (handles cases where ytInitialPlayerResponse is not accessible via script injection)
+  if (isYouTube && (!Array.isArray(captionTracks) || captionTracks.length === 0)) {
+    console.log('[KC] MAIN world found no captionTracks — trying HTML fetch fallback');
     try {
-      const { url, title, captionTracks } = pageInfo;
-      const manual = captionTracks.filter(t => t.kind !== "asr");
-      const pool   = manual.length ? manual : captionTracks;
-      const pick   = pool.find(t => /^zh/.test(t.languageCode))
-                  || pool.find(t => t.languageCode === "en")
-                  || pool[0];
-      const resp = await fetch(pick.baseUrl + "&fmt=json3");
-      if (resp.ok) {
-        const data  = await resp.json();
-        const maxLen = 15000;
-        const lines = (data.events || [])
-          .filter(e => e.segs)
-          .map(e => e.segs.map(s => (s.utf8 || "").replace(/\n/g, " ")).join(""))
-          .filter(Boolean);
-        const text = lines.join("\n").trim();
-        if (text.length > 0) {
-          return {
-            text: text.length > maxLen
-              ? text.slice(0, maxLen) + "\n\n[... transcript truncated ...]"
-              : text,
-            title,
-            url,
-            isYouTubeTranscript: true,
-            transcriptLang: pick.languageCode
-          };
+      const pageResp = await fetch(pageInfo.url, { credentials: "include" });
+      if (pageResp.ok) {
+        const html = await pageResp.text();
+        const found = _extractCaptionTracksFromText(html);
+        if (found) {
+          captionTracks = found;
+          console.log('[KC] captionTracks from HTML fetch:', captionTracks.length, 'tracks');
+        } else {
+          console.log('[KC] No captionTracks in HTML (video may have no captions)');
         }
       }
-    } catch (_e) {
-      // transcript fetch failed — fall through to normal extraction
+    } catch (e) {
+      console.error('[KC] HTML fetch error:', e);
+    }
+  }
+
+  // Step 2: Fetch transcript from WITHIN the page (MAIN world) so it runs with
+  // YouTube's own cookies and same-origin policy — service-worker fetch lacks these.
+  if (Array.isArray(captionTracks) && captionTracks.length > 0) {
+    try {
+      const [{ result: transcriptResult }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: async (tracksJson) => {
+          const dbg = { steps: [] };
+          try {
+            let tracks = JSON.parse(tracksJson);
+
+            // Refresh captionTracks from inside the page — service-worker-fetched HTML
+            // often has unsigned/stale URLs. The page's own same-origin fetch gets fresh ones.
+            try {
+              const pageResp = await fetch(window.location.href, { credentials: "include" });
+              dbg.steps.push(`pageFetch:${pageResp.status}`);
+              if (pageResp.ok) {
+                const html = await pageResp.text();
+                dbg.steps.push(`htmlLen:${html.length}`);
+                const idx = html.indexOf('"captionTracks":');
+                if (idx !== -1) {
+                  const bs = html.indexOf('[', idx);
+                  let d = 0, end = -1;
+                  for (let i = bs; i < html.length && end === -1; i++) {
+                    const c = html[i];
+                    if (c === '[' || c === '{') d++;
+                    else if (c === ']' || c === '}') { d--; if (d === 0) end = i + 1; }
+                  }
+                  if (end !== -1) {
+                    try {
+                      const fresh = JSON.parse(html.substring(bs, end));
+                      if (Array.isArray(fresh) && fresh.length) {
+                        tracks = fresh.map(t => ({
+                          baseUrl: t.baseUrl, languageCode: t.languageCode, kind: t.kind || ""
+                        }));
+                        dbg.steps.push(`freshTracks:${tracks.length}`);
+                      }
+                    } catch (_) {}
+                  }
+                }
+              }
+            } catch (e) { dbg.steps.push(`pageFetchErr:${e.message}`); }
+
+            const manual = tracks.filter(t => t.kind !== "asr");
+            const pool   = manual.length ? manual : tracks;
+            const pick   = pool.find(t => /^zh/.test(t.languageCode))
+                        || pool.find(t => t.languageCode === "en")
+                        || pool[0];
+            if (!pick?.baseUrl) return { dbg, error: "no pick" };
+
+            dbg.lang = pick.languageCode;
+            dbg.baseUrlPrefix = pick.baseUrl.substring(0, 100);
+
+            let base = pick.baseUrl;
+            if (!/[?&]lang=/.test(base)) base += `&lang=${pick.languageCode}`;
+
+            // Attempt JSON3
+            try {
+              const u = /[?&]fmt=/.test(base) ? base : base + "&fmt=json3";
+              const r = await fetch(u);
+              const raw = await r.text();
+              dbg.steps.push(`json3:${r.status}/${r.headers.get('content-type')}/${raw.length}`);
+              if (r.ok && raw.trimStart().startsWith("{")) {
+                const data = JSON.parse(raw);
+                const lines = (data.events || [])
+                  .filter(e => e.segs)
+                  .map(e => e.segs.map(s => (s.utf8 || "").replace(/\n/g, " ")).join(""))
+                  .filter(Boolean);
+                const text = lines.join("\n").trim();
+                if (text) return { text, lang: pick.languageCode, dbg };
+              }
+            } catch (e) { dbg.steps.push(`json3Err:${e.message}`); }
+
+            // Attempt XML
+            try {
+              const u = base.replace(/[?&]fmt=[^&]*/g, "");
+              const r = await fetch(u);
+              const raw = await r.text();
+              dbg.steps.push(`xml:${r.status}/${r.headers.get('content-type')}/${raw.length}`);
+              if (r.ok && raw.includes("<text")) {
+                const lines = [];
+                const rx = /<text[^>]*>([\s\S]*?)<\/text>/g;
+                let m;
+                while ((m = rx.exec(raw)) !== null) {
+                  const seg = m[1]
+                    .replace(/<[^>]+>/g, "")
+                    .replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+                    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+                    .replace(/\n/g, " ").trim();
+                  if (seg) lines.push(seg);
+                }
+                const text = lines.join("\n").trim();
+                if (text) return { text, lang: pick.languageCode, dbg };
+              }
+            } catch (e) { dbg.steps.push(`xmlErr:${e.message}`); }
+
+            return { dbg, error: "no transcript text" };
+          } catch (e) {
+            dbg.fatal = e.message;
+            return { dbg, error: e.message };
+          }
+        },
+        args: [JSON.stringify(captionTracks)]
+      });
+
+      console.log('[KC] MAIN world transcript result:', transcriptResult);
+
+      if (transcriptResult?.text) {
+        const maxLen = 15000;
+        const text = transcriptResult.text;
+        return {
+          text: text.length > maxLen
+            ? text.slice(0, maxLen) + "\n\n[... transcript truncated ...]"
+            : text,
+          title: pageInfo.title,
+          url: pageInfo.url,
+          isYouTubeTranscript: true,
+          transcriptLang: transcriptResult.lang
+        };
+      }
+    } catch (e) {
+      console.error("[KC] MAIN world transcript fetch error:", e);
+    }
+  }
+
+  // Step 2b: Last-resort fallback — open YouTube's own transcript panel via DOM
+  // and scrape the segment text. Works even for ASR/signed-URL cases.
+  if (isYouTube) {
+    try {
+      console.log("[KC] trying DOM transcript scrape");
+      const [{ result: domResult }] = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: async () => {
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+          const dbg = { steps: [] };
+
+          // Selectors for the transcript engagement panel
+          const PANEL_SELECTOR =
+            'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]';
+          const SEG_SELECTORS = [
+            "ytd-transcript-segment-renderer .segment-text",
+            "ytd-transcript-segment-renderer yt-formatted-string.segment-text",
+            "ytd-transcript-segment-renderer div.segment-text",
+            "ytd-transcript-segment-renderer"
+          ];
+
+          // Check if the transcript panel is already open and populated
+          const isPanelVisible = () => {
+            const p = document.querySelector(PANEL_SELECTOR);
+            if (!p) return false;
+            const vis = p.getAttribute("visibility");
+            // Newer YT uses visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"
+            if (vis && /EXPANDED/i.test(vis)) return true;
+            // Fallback: check if rendered (has size)
+            const rect = p.getBoundingClientRect();
+            return rect.height > 50 && rect.width > 50;
+          };
+
+          const collectSegments = () => {
+            for (const sel of SEG_SELECTORS) {
+              const found = document.querySelectorAll(sel);
+              if (found.length > 0) return { segs: found, sel };
+            }
+            return { segs: [], sel: "" };
+          };
+
+          const extractText = () => {
+            const { segs, sel } = collectSegments();
+            if (segs.length > 0) {
+              const lines = [...segs].map(s => (s.textContent || "").trim()).filter(Boolean);
+              return { text: lines.join("\n"), via: `segs:${sel}` };
+            }
+            // Panel-level fallback
+            const panel = document.querySelector(PANEL_SELECTOR);
+            if (panel) {
+              const txt = (panel.innerText || "")
+                .split("\n").map(l => l.trim())
+                .filter(l => l && !/^transcript$/i.test(l) && !/^search$/i.test(l)
+                          && !/^\u5b57\u5e55$|^\u6587\u5b57\u8a18\u9304$/.test(l))
+                .join("\n");
+              if (txt.length > 50) return { text: txt, via: "panelInnerText" };
+            }
+            return { text: "", via: "" };
+          };
+
+          // If panel already open, just scrape immediately
+          if (isPanelVisible()) {
+            dbg.steps.push("alreadyOpen");
+            // wait a tick in case content needs to render
+            for (let i = 0; i < 10; i++) {
+              const r = extractText();
+              if (r.text) { dbg.steps.push(r.via); return { text: r.text, lang: "", dbg }; }
+              await sleep(150);
+            }
+          }
+
+          // Otherwise, find and click the "Show transcript" button.
+
+          // Try description-area button first (most reliable on modern desktop YT)
+          const tryClickButton = async () => {
+            // Expand description if collapsed
+            const expand = document.querySelector("#expand, tp-yt-paper-button#expand");
+            if (expand && expand.offsetParent !== null) {
+              expand.click();
+              dbg.steps.push("expanded");
+              await sleep(400);
+            }
+
+            // Specific button in description's transcript section
+            const inDescBtn = document.querySelector(
+              "ytd-video-description-transcript-section-renderer button, " +
+              "ytd-video-description-transcript-section-renderer yt-button-shape button"
+            );
+            if (inDescBtn) {
+              inDescBtn.click();
+              dbg.steps.push("descBtnClicked");
+              return true;
+            }
+
+            // Broader search: any button matching transcript label, but EXCLUDE
+            // "hide" labels so we don't toggle off an already-open panel.
+            const showRe = /(show transcript|\u986f\u793a\u5b57\u5e55|\u663e\u793a\u5b57\u5e55|\u986f\u793a\u6587\u5b57\u8a18\u9304|\u663e\u793a\u6587\u5b57\u8bb0\u5f55|show full transcript)/i;
+            const hideRe = /(hide transcript|\u96b1\u85cf\u5b57\u5e55|\u9690\u85cf\u5b57\u5e55)/i;
+            const candidates = document.querySelectorAll(
+              "button, tp-yt-paper-button, yt-button-shape, ytd-button-renderer, " +
+              "ytd-menu-service-item-renderer, tp-yt-paper-item"
+            );
+            for (const el of candidates) {
+              const label = (el.getAttribute("aria-label") || "") + " " + (el.textContent || "");
+              if (hideRe.test(label)) continue;
+              if (showRe.test(label)) {
+                el.click();
+                dbg.steps.push("genericBtnClicked");
+                return true;
+              }
+            }
+
+            // Try "..." menu (More actions)
+            const moreBtn = document.querySelector(
+              "ytd-watch-metadata #button-shape > button, " +
+              "ytd-menu-renderer #button button"
+            );
+            if (moreBtn) {
+              moreBtn.click();
+              dbg.steps.push("moreClicked");
+              await sleep(500);
+              for (const el of document.querySelectorAll(
+                "tp-yt-paper-item, ytd-menu-service-item-renderer"
+              )) {
+                const label = (el.getAttribute("aria-label") || "") + " " + (el.textContent || "");
+                if (showRe.test(label)) {
+                  el.click();
+                  dbg.steps.push("menuItemClicked");
+                  return true;
+                }
+              }
+            }
+            return false;
+          };
+
+          const clicked = await tryClickButton();
+          if (!clicked) { dbg.steps.push("noBtn"); return { dbg, error: "transcript button not found" }; }
+
+          // Poll for panel + content
+          for (let i = 0; i < 60; i++) {
+            await sleep(200);
+            const r = extractText();
+            if (r.text) { dbg.steps.push(r.via); return { text: r.text, lang: "", dbg }; }
+          }
+
+          // Final fallback: button was clicked successfully, so the transcript panel
+          // should have opened. Even if our selectors didn't match, the page's
+          // innerText now includes the transcript content — return it and mark as
+          // a successful transcript load.
+          dbg.steps.push("clickedButSelectorMissed");
+          const bodyText = (document.body?.innerText || "").trim();
+          if (bodyText.length > 0) {
+            return { text: bodyText, lang: "", dbg, fromBodyInnerText: true };
+          }
+          return { dbg, error: "no content after click" };
+        }
+      });
+
+      console.log("[KC] DOM transcript result:", domResult);
+
+      if (domResult?.text) {
+        const maxLen = 15000;
+        const text = domResult.text;
+        return {
+          text: text.length > maxLen
+            ? text.slice(0, maxLen) + "\n\n[... transcript truncated ...]"
+            : text,
+          title: pageInfo.title,
+          url: pageInfo.url,
+          isYouTubeTranscript: true,
+          transcriptLang: domResult.lang || "auto"
+        };
+      }
+    } catch (e) {
+      console.error("[KC] DOM transcript error:", e);
     }
   }
 
@@ -171,6 +503,12 @@ async function getPageContent(tabId) {
       return { text, title, url };
     }
   });
+
+  // If we're on a YouTube watch page but never got transcript text,
+  // flag it so the UI can show a distinct "no transcript available" message.
+  if (isYouTube && result) {
+    result.isYouTubeNoTranscript = true;
+  }
 
   return result;
 }
@@ -336,13 +674,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MESSAGE_TYPES.GET_PAGE_CONTENT) {
     (async () => {
       try {
+        console.log('[KC] GET_PAGE_CONTENT tabId=', message.tabId);
         const content = await getPageContent(message.tabId);
+        console.log('[KC] result:', content ? { isYT: content.isYouTubeTranscript, len: content.text?.length, lang: content.transcriptLang } : null);
         if (!content?.text?.trim()) {
           sendResponse({ ok: false, error: "No page text found." });
           return;
         }
         sendResponse({ ok: true, content });
       } catch (err) {
+        console.error('[KC] getPageContent error:', err);
         sendResponse({ ok: false, error: err.message || String(err) });
       }
     })();
