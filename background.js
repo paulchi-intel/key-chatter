@@ -94,18 +94,80 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 async function getPageContent(tabId) {
+  // Step 1: Sync extraction in MAIN world — access ytInitialPlayerResponse
+  const [{ result: pageInfo }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => {
+      const url   = window.location.href || "";
+      const title = document.title || "";
+      let captionTracks = null;
+      if (/youtube\.com\/watch/.test(url)) {
+        try {
+          const tracks = window.ytInitialPlayerResponse
+            ?.captions
+            ?.playerCaptionsTracklistRenderer
+            ?.captionTracks;
+          if (Array.isArray(tracks) && tracks.length > 0) {
+            // Serialize only needed fields so the result is safely transferable
+            captionTracks = tracks.map(t => ({
+              baseUrl: t.baseUrl,
+              languageCode: t.languageCode,
+              kind: t.kind || ""
+            }));
+          }
+        } catch (_e) {}
+      }
+      return { url, title, captionTracks };
+    }
+  });
+
+  // Step 2: If YouTube captions found, fetch transcript from service worker
+  if (Array.isArray(pageInfo?.captionTracks) && pageInfo.captionTracks.length > 0) {
+    try {
+      const { url, title, captionTracks } = pageInfo;
+      const manual = captionTracks.filter(t => t.kind !== "asr");
+      const pool   = manual.length ? manual : captionTracks;
+      const pick   = pool.find(t => /^zh/.test(t.languageCode))
+                  || pool.find(t => t.languageCode === "en")
+                  || pool[0];
+      const resp = await fetch(pick.baseUrl + "&fmt=json3");
+      if (resp.ok) {
+        const data  = await resp.json();
+        const maxLen = 15000;
+        const lines = (data.events || [])
+          .filter(e => e.segs)
+          .map(e => e.segs.map(s => (s.utf8 || "").replace(/\n/g, " ")).join(""))
+          .filter(Boolean);
+        const text = lines.join("\n").trim();
+        if (text.length > 0) {
+          return {
+            text: text.length > maxLen
+              ? text.slice(0, maxLen) + "\n\n[... transcript truncated ...]"
+              : text,
+            title,
+            url,
+            isYouTubeTranscript: true,
+            transcriptLang: pick.languageCode
+          };
+        }
+      }
+    } catch (_e) {
+      // transcript fetch failed — fall through to normal extraction
+    }
+  }
+
+  // Step 3: Normal page content extraction (ISOLATED world, sync)
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
       let text = document.body ? document.body.innerText || "" : "";
       const title = document.title || "";
-      const url = window.location.href || "";
-
+      const url   = window.location.href || "";
       const maxLen = 15000;
       if (text.length > maxLen) {
         text = `${text.slice(0, maxLen)}\n\n[... content truncated ...]`;
       }
-
       return { text, title, url };
     }
   });

@@ -71,6 +71,8 @@ const TRANSLATIONS = {
     "status-session-saved": "對話已儲存",
     "status-session-empty": "沒有對話可儲存",
     "confirm-save-before-clear": "對話尚未儲存，是否要先儲存？",
+    "system-youtube-transcript-loaded": "已載入 YouTube 字幕",
+    "status-youtube-transcript-loaded": "YouTube 字幕已載入",
     "dialog-yes": "是",
     "dialog-no": "否",
     "dialog-cancel": "取消",
@@ -133,6 +135,8 @@ const TRANSLATIONS = {
     "status-session-saved": "对话已保存",
     "status-session-empty": "没有对话可储存",
     "confirm-save-before-clear": "对话尚未保存，是否要先保存？",
+    "system-youtube-transcript-loaded": "已载入 YouTube 字幕",
+    "status-youtube-transcript-loaded": "YouTube 字幕已载入",
     "dialog-yes": "是",
     "dialog-no": "否",
     "dialog-cancel": "取消",
@@ -195,6 +199,8 @@ const TRANSLATIONS = {
     "status-session-saved": "Session saved",
     "status-session-empty": "No conversation to save",
     "confirm-save-before-clear": "Session not saved. Save before clearing?",
+    "system-youtube-transcript-loaded": "YouTube transcript loaded",
+    "status-youtube-transcript-loaded": "YouTube transcript loaded",
     "dialog-yes": "Yes",
     "dialog-no": "No",
     "dialog-cancel": "Cancel",
@@ -1293,13 +1299,19 @@ async function loadPageContent() {
 
     state.pageContent = response.content;
     showPageInfo(state.pageContent.title, state.pageContent.url);
-    addSystemMessage(t("system-page-loaded"));
+    const sysMsg = state.pageContent.isYouTubeTranscript
+      ? t("system-youtube-transcript-loaded")
+      : t("system-page-loaded");
+    addSystemMessage(sysMsg);
     showQuickQuestions();
     commitActiveTab();
     renderTabBar();
 
     await saveState();
-    setStatus("ready", t("status-page-loaded"));
+    const statusMsg = state.pageContent.isYouTubeTranscript
+      ? t("status-youtube-transcript-loaded")
+      : t("status-page-loaded");
+    setStatus("ready", statusMsg);
   } catch (err) {
     state.pageContent = null;
     setStatus("error", t("error-load-page") + (err.message || String(err)));
