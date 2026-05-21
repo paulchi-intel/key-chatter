@@ -293,7 +293,7 @@ async function getPageContent(tabId) {
       console.log('[KC] MAIN world transcript result:', transcriptResult);
 
       if (transcriptResult?.text) {
-        const maxLen = 15000;
+        const maxLen = 200000; // ~3+ hrs of transcript; normal page content stays at 15000
         const text = transcriptResult.text;
         return {
           text: text.length > maxLen
@@ -556,7 +556,7 @@ async function getPageContent(tabId) {
       console.log("[KC] DOM transcript result:", domResult);
 
       if (domResult?.text) {
-        const maxLen = 15000;
+        const maxLen = 200000; // ~3+ hrs of transcript; normal page content stays at 15000
         const text = domResult.text;
         return {
           text: text.length > maxLen
