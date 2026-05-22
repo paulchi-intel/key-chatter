@@ -777,6 +777,12 @@ async function initializeState() {
   state.currentLanguage = stored[STORAGE_KEYS.language] || "zh-TW";
   state.savedPrompts = Array.isArray(stored[STORAGE_KEYS.savedPrompts]) ? stored[STORAGE_KEYS.savedPrompts] : [];
   state.panelMode = stored[STORAGE_KEYS.panelMode] || "sidepanel";
+  // URL param is ground truth: no srcWindowId means we're in the sidepanel, not a popup.
+  if (POPUP_SRC_WINDOW_ID === null) {
+    state.panelMode = "sidepanel";
+  } else {
+    state.panelMode = "popup";
+  }
 
   // Load tabs or migrate from legacy flat storage
   if (Array.isArray(stored.kc_tabs) && stored.kc_tabs.length > 0) {
