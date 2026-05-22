@@ -544,11 +544,38 @@ function _appendTranscriptToggle(node, transcript) {
   node.appendChild(panel);
 }
 
+async function navigateToUrl(url) {
+  try {
+    const found = await chrome.tabs.query({ url });
+    if (found.length > 0) {
+      await chrome.tabs.update(found[0].id, { active: true });
+      await chrome.windows.update(found[0].windowId, { focused: true });
+    } else {
+      await chrome.tabs.create({ url });
+    }
+  } catch (e) {
+    console.error("[KC] navigateToUrl error:", e);
+  }
+}
+
+function _setPageUrl(element, url) {
+  element.textContent = "";
+  if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+    const a = document.createElement("a");
+    a.href = "#";
+    a.textContent = url;
+    a.addEventListener("click", (e) => { e.preventDefault(); navigateToUrl(url); });
+    element.appendChild(a);
+  } else {
+    element.textContent = url || "";
+  }
+}
+
 function showPageInfo(title, url, transcript = null) {
   let node = UI.messagesContainer.querySelector(".page-info");
   if (node) {
     node.querySelector(".page-title").textContent = title || "";
-    node.querySelector(".page-url").textContent = url || "";
+    _setPageUrl(node.querySelector(".page-url"), url);
     const oldToggle = node.querySelector(".transcript-toggle");
     const oldPanel  = node.querySelector(".transcript-panel");
     if (oldToggle) oldToggle.remove();
@@ -560,7 +587,7 @@ function showPageInfo(title, url, transcript = null) {
   node.className = "page-info";
   node.innerHTML = "<div class=\"page-title\"></div><div class=\"page-url\"></div>";
   node.querySelector(".page-title").textContent = title || "";
-  node.querySelector(".page-url").textContent = url || "";
+  _setPageUrl(node.querySelector(".page-url"), url);
   if (transcript) _appendTranscriptToggle(node, transcript);
   UI.messagesContainer.prepend(node);
 }

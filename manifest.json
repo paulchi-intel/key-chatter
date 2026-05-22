@@ -5,6 +5,7 @@
   "description": "ExpertGPT side panel chat with single API key, model selection, quick prompts, and multilingual UI.",
   "permissions": [
     "activeTab",
+    "tabs",
     "scripting",
     "storage",
     "sidePanel",
