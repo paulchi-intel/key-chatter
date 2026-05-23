@@ -794,13 +794,36 @@
       background: #f9fafb;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
-      transition: all 0.2s;
+      transition: background 0.15s, border-color 0.15s, opacity 0.15s;
     }
 
     .saved-prompt-item:hover {
       background: #f3f4f6;
       border-color: #d1d5db;
     }
+
+    .saved-prompt-item.dragging {
+      opacity: 0.4;
+      border-style: dashed;
+    }
+
+    .saved-prompt-item.drag-over {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+
+    .drag-handle {
+      cursor: grab;
+      color: #9ca3af;
+      font-size: 15px;
+      padding: 0 2px;
+      user-select: none;
+      align-self: center;
+      line-height: 1;
+    }
+
+    .drag-handle:hover { color: #6b7280; }
+    .drag-handle:active { cursor: grabbing; }
 
     .saved-prompt-text {
       flex: 1;

@@ -1547,7 +1547,8 @@ function renderSavedPromptsList() {
   UI.savedPromptsList.innerHTML = state.savedPrompts
     .map(
       (prompt, index) => `
-      <div class="saved-prompt-item">
+      <div class="saved-prompt-item" draggable="true" data-index="${index}">
+        <div class="drag-handle" title="拖曳排序">⠿</div>
         <div class="saved-prompt-text" data-index="${index}">${escapeHtml(prompt)}</div>
         <div class="saved-prompt-actions">
           <button class="prompt-action-btn delete-prompt-btn" data-index="${index}" title="Delete">🗑️</button>
@@ -1556,6 +1557,51 @@ function renderSavedPromptsList() {
     `
     )
     .join("");
+
+  let draggingIndex = null;
+
+  UI.savedPromptsList.querySelectorAll(".saved-prompt-item").forEach((item) => {
+    const idx = Number(item.dataset.index);
+    const handle = item.querySelector(".drag-handle");
+
+    // Only start drag when initiated from the handle
+    handle.addEventListener("mousedown", () => { item._dragFromHandle = true; });
+    handle.addEventListener("mouseup",   () => { item._dragFromHandle = false; });
+
+    item.addEventListener("dragstart", (e) => {
+      if (!item._dragFromHandle) { e.preventDefault(); return; }
+      draggingIndex = idx;
+      item.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+
+    item.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      UI.savedPromptsList.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+      if (idx !== draggingIndex) item.classList.add("drag-over");
+    });
+
+    item.addEventListener("dragleave", () => { item.classList.remove("drag-over"); });
+
+    item.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      item.classList.remove("drag-over");
+      if (draggingIndex === null || draggingIndex === idx) return;
+      const [dragged] = state.savedPrompts.splice(draggingIndex, 1);
+      state.savedPrompts.splice(idx, 0, dragged);
+      await saveState();
+      renderSavedPromptsList();
+      if (state.pageContent) showSavedPromptsSection();
+    });
+
+    item.addEventListener("dragend", () => {
+      item._dragFromHandle = false;
+      item.classList.remove("dragging");
+      UI.savedPromptsList.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+      draggingIndex = null;
+    });
+  });
 
   UI.savedPromptsList.querySelectorAll(".saved-prompt-text").forEach((element) => {
     element.addEventListener("click", () => {
