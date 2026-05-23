@@ -1547,7 +1547,7 @@ function renderSavedPromptsList() {
   UI.savedPromptsList.innerHTML = state.savedPrompts
     .map(
       (prompt, index) => `
-      <div class="saved-prompt-item" draggable="true" data-index="${index}">
+      <div class="saved-prompt-item" data-index="${index}">
         <div class="drag-handle" title="拖曳排序">⠿</div>
         <div class="saved-prompt-text" data-index="${index}">${escapeHtml(prompt)}</div>
         <div class="saved-prompt-actions">
@@ -1564,15 +1564,16 @@ function renderSavedPromptsList() {
     const idx = Number(item.dataset.index);
     const handle = item.querySelector(".drag-handle");
 
-    // Only start drag when initiated from the handle
-    handle.addEventListener("mousedown", () => { item._dragFromHandle = true; });
-    handle.addEventListener("mouseup",   () => { item._dragFromHandle = false; });
+    // Enable dragging only when pointerdown on the handle
+    handle.addEventListener("pointerdown", () => {
+      item.setAttribute("draggable", "true");
+    });
 
     item.addEventListener("dragstart", (e) => {
-      if (!item._dragFromHandle) { e.preventDefault(); return; }
       draggingIndex = idx;
       item.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(idx));
     });
 
     item.addEventListener("dragover", (e) => {
@@ -1596,7 +1597,7 @@ function renderSavedPromptsList() {
     });
 
     item.addEventListener("dragend", () => {
-      item._dragFromHandle = false;
+      item.removeAttribute("draggable");
       item.classList.remove("dragging");
       UI.savedPromptsList.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
       draggingIndex = null;
