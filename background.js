@@ -5,6 +5,7 @@ const OPENAI_BASE_URL = "https://expertgpt.intel.com/v1";
 const ANTHROPIC_BASE_URL = "https://expertgpt.intel.com/anthropic/v1";
 const GNAI_OPENAI_BASE_URL = "https://gnai.intel.com/api/providers/openai/v1";
 const GNAI_ANTHROPIC_BASE_URL = "https://gnai.intel.com/api/providers/anthropic";
+const GNAI_USER_API_URL = "https://gnai.intel.com/api/user";
 const REQUEST_TIMEOUT_MS = 30000;
 
 const GNAI_OPENAI_MODELS = ["gpt-4o", "gpt-4.1", "gpt-5-mini", "gpt-5-nano", "o3-mini"];
@@ -23,7 +24,8 @@ const MESSAGE_TYPES = {
   GET_PAGE_CONTENT: "GET_PAGE_CONTENT",
   CHAT: "CHAT",
   GET_QUOTA: "GET_QUOTA",
-  SET_PANEL_MODE: "SET_PANEL_MODE"
+  SET_PANEL_MODE: "SET_PANEL_MODE",
+  GET_BUDGET: "GET_BUDGET"
 };
 
 const SYSTEM_PROMPTS = {
@@ -791,6 +793,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: true, result });
       } catch (err) {
         sendResponse({ ok: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MESSAGE_TYPES.GET_BUDGET) {
+    if (!isGnaiKey(message.apiKey)) {
+      sendResponse({ ok: false, error: "Not a GNAI key" });
+      return false;
+    }
+    (async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(GNAI_USER_API_URL, {
+          headers: { "Authorization": `Bearer ${message.apiKey}`, "Accept": "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const costs = (data.rate_limits ?? []).filter(r => r.context === "default" && r.kind === "cost");
+        const daily  = costs.find(r => /per\s+\d*\s*day/i.test(r.limit));
+        const hourly = costs.find(r => /per\s+\d*\s*hour/i.test(r.limit));
+        if (!daily) throw new Error("No daily cost limit found");
+        sendResponse({
+          ok: true,
+          daily:  { used: daily.used,  max: daily.max },
+          hourly: hourly ? { used: hourly.used, max: hourly.max } : null,
+          rateLimits: data.rate_limits ?? []
+        });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      } finally {
+        clearTimeout(timeoutId);
       }
     })();
     return true;

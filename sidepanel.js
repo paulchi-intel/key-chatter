@@ -228,6 +228,7 @@ const UI = {
   languageSelect: document.getElementById("languageSelect"),
   statusIndicator: document.getElementById("statusIndicator"),
   statusText: document.getElementById("statusText"),
+  budgetText: document.getElementById("budgetText"),
   messagesContainer: document.getElementById("messagesContainer"),
   messageInput: document.getElementById("messageInput"),
   sendBtn: document.getElementById("sendBtn"),
@@ -399,6 +400,73 @@ function setStatus(type, text) {
   UI.statusText.textContent = text;
 }
 
+function budgetParseWindow(limit) {
+  const m = limit.match(/per\s+(\d+)?\s*(second|minute|hour|day)/i);
+  if (!m) return limit;
+  const n = m[1] ? parseInt(m[1]) : 1;
+  const abbr = { second: "s", minute: "m", hour: "h", day: "d" };
+  return `${n}${abbr[m[2].toLowerCase()]}`;
+}
+
+function budgetFormatRemaining(seconds) {
+  seconds = Math.floor(seconds);
+  if (seconds <= 0) return "0s";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (d > 0) return `${d}d${h}h`;
+  if (h > 0) return `${h}h${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${m}m${String(s).padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+function buildBudgetTooltip(rateLimits) {
+  const now = Date.now() / 1000;
+  const contexts = [...new Set(rateLimits.map(r => r.context))];
+  const lines = [];
+  for (const ctx of contexts) {
+    const group = rateLimits.filter(r => r.context === ctx);
+    if (!group.length) continue;
+    lines.push(`[${ctx}]`);
+    for (const r of group) {
+      const win = budgetParseWindow(r.limit);
+      const label = `  ${r.kind} (${win})`;
+      const value = r.kind === "cost"
+        ? `$${r.used.toFixed(2)} / $${r.max}`
+        : `${r.used} / ${r.max}`;
+      const reset = r.reset ? `  (resets in ${budgetFormatRemaining(r.reset - now)})` : "";
+      lines.push(`${label.padEnd(20)}${value}${reset}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+async function refreshBudget() {
+  if (!isGnaiKey(state.selectedApiKey)) {
+    UI.budgetText.textContent = "";
+    UI.budgetText.title = "";
+    return;
+  }
+  const res = await sendRuntimeMessage({
+    type: "GET_BUDGET",
+    apiKey: state.selectedApiKey
+  });
+  if (!res.ok) { UI.budgetText.textContent = ""; UI.budgetText.title = ""; return; }
+  const pctEmoji = (pct) => pct < 80 ? "🟢" : pct < 100 ? "🟡" : "🔴";
+  const dp = (res.daily.used / res.daily.max) * 100;
+  let text = `${pctEmoji(dp)} D:$${res.daily.used.toFixed(2)}/$${Math.round(res.daily.max)}`;
+  if (res.hourly) {
+    const hp = (res.hourly.used / res.hourly.max) * 100;
+    text = `${pctEmoji(hp)} H:$${res.hourly.used.toFixed(2)}/$${Math.round(res.hourly.max)} | ${text}`;
+  }
+  UI.budgetText.textContent = text;
+  UI.budgetText.title = res.rateLimits?.length
+    ? buildBudgetTooltip(res.rateLimits)
+    : "";
+}
+
 async function sendRuntimeMessage(payload) {
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
@@ -460,6 +528,7 @@ function promptForApiKey(force = false) {
       cleanup();
       setSingleApiKey(key).then(() => {
         setStatus("ready", t("apikey-updated"));
+        refreshBudget();
         resolve(true);
       });
     }
@@ -1756,6 +1825,7 @@ function setupEventHandlers() {
     await saveState();
   });
 
+  UI.budgetText.addEventListener("click", () => refreshBudget());
   UI.panelModeBtn.addEventListener("click", togglePanelMode);
   UI.saveSessionBtn.addEventListener("click", downloadSession);
   UI.loadPageBtn.addEventListener("click", loadPageContent);
@@ -1802,6 +1872,8 @@ async function bootstrap() {
 
   setStatus("ready", t("status-ready"));
   await loadModels();
+  refreshBudget();
+  setInterval(refreshBudget, 5 * 60 * 1000);
 }
 
 bootstrap().catch((err) => {
