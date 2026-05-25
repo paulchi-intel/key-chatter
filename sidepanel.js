@@ -428,15 +428,15 @@ function buildBudgetTooltip(rateLimits) {
   for (const ctx of contexts) {
     const group = rateLimits.filter(r => r.context === ctx);
     if (!group.length) continue;
-    lines.push(`[${ctx}]`);
+    if (ctx !== "default") lines.push(`[${ctx}]`);
     for (const r of group) {
       const win = budgetParseWindow(r.limit);
-      const label = `  ${r.kind} (${win})`;
+      const label = `${r.kind} (${win})`;
       const value = r.kind === "cost"
         ? `$${r.used.toFixed(2)} / $${r.max}`
         : `${r.used} / ${r.max}`;
       const reset = r.reset ? `  (resets in ${budgetFormatRemaining(r.reset - now)})` : "";
-      lines.push(`${label.padEnd(20)}${value}${reset}`);
+      lines.push(`${label}\t${value}${reset}`);
     }
     lines.push("");
   }
