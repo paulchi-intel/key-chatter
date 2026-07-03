@@ -1,6 +1,8 @@
 // background.js (service worker, MV3)
 // ExpertGPT API bridge for chat + personal quota
 
+import { CANDIDATE_MODELS } from "./models-catalog.js";
+
 const OPENAI_BASE_URL = "https://expertgpt.intel.com/v1";
 const ANTHROPIC_BASE_URL = "https://expertgpt.intel.com/anthropic/v1";
 const GNAI_OPENAI_BASE_URL = "https://gnai.intel.com/api/providers/openai/v1";
@@ -25,7 +27,8 @@ const MESSAGE_TYPES = {
   CHAT: "CHAT",
   GET_QUOTA: "GET_QUOTA",
   SET_PANEL_MODE: "SET_PANEL_MODE",
-  GET_BUDGET: "GET_BUDGET"
+  GET_BUDGET: "GET_BUDGET",
+  VERIFY_MODELS: "VERIFY_MODELS"
 };
 
 const SYSTEM_PROMPTS = {
@@ -688,6 +691,103 @@ async function fetchAnthropicModels(apiKey) {
     .filter(Boolean);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Model verification: probe each candidate model with a minimal request and
+// report which ones are actually available on the current API key/endpoint.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Fetch without throwing on non-2xx, so we can inspect the status code.
+async function probeFetch(url, apiKey, body) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    let text = "";
+    try { text = await response.text(); } catch (_e) { /* ignore */ }
+    return { status: response.status, ok: response.ok, text };
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      return { status: 0, ok: false, text: `timeout after ${REQUEST_TIMEOUT_MS}ms` };
+    }
+    return { status: 0, ok: false, text: err.message || String(err) };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Probe a single model. Returns { model, available, status, error }.
+// available === true means the model exists and is usable on this key.
+// A 429 (rate limited) still means the model exists, so it counts as available.
+async function probeModel(apiKey, model) {
+  try {
+    let url;
+    let body;
+    if (isAnthropicModel(model)) {
+      const base = isGnaiKey(apiKey) ? GNAI_ANTHROPIC_BASE_URL : ANTHROPIC_BASE_URL;
+      const path = isGnaiKey(apiKey) ? "/v1/messages" : "/messages";
+      url = `${base}${path}`;
+      body = { model, max_tokens: 1, messages: [{ role: "user", content: "Hi" }] };
+    } else {
+      const base = isGnaiKey(apiKey) ? GNAI_OPENAI_BASE_URL : OPENAI_BASE_URL;
+      url = `${base}/chat/completions`;
+      const isReasoningModel = /^o\d/i.test(model) || /^gpt-5/i.test(model);
+      body = {
+        model,
+        messages: [{ role: "user", content: "Hi" }],
+        stream: false,
+        ...(isReasoningModel ? { max_completion_tokens: 16 } : { max_tokens: 1 })
+      };
+    }
+
+    const res = await probeFetch(url, apiKey, body);
+    const available = res.ok || res.status === 429;
+    return {
+      model,
+      available,
+      status: res.status,
+      error: available ? null : (res.text || "").slice(0, 160)
+    };
+  } catch (err) {
+    return { model, available: false, status: 0, error: err.message || String(err) };
+  }
+}
+
+// Run probes with limited concurrency to avoid hammering the API.
+async function verifyModels(apiKey) {
+  assertApiKey(apiKey);
+  const openaiCandidates = Array.isArray(CANDIDATE_MODELS.openai) ? CANDIDATE_MODELS.openai : [];
+  const anthropicCandidates = Array.isArray(CANDIDATE_MODELS.anthropic) ? CANDIDATE_MODELS.anthropic : [];
+  const all = [...openaiCandidates, ...anthropicCandidates];
+
+  const CONCURRENCY = 6;
+  const results = new Array(all.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < all.length) {
+      const index = cursor++;
+      results[index] = await probeModel(apiKey, all[index]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, all.length) }, worker));
+
+  const availableSet = new Set(results.filter((r) => r && r.available).map((r) => r.model));
+  return {
+    openaiModels: openaiCandidates.filter((m) => availableSet.has(m)),
+    anthropicModels: anthropicCandidates.filter((m) => availableSet.has(m)),
+    details: results
+  };
+}
+
 async function callExpertGPT(messages, language, apiKey, model) {
   assertApiKey(apiKey);
   const systemPrompt = SYSTEM_PROMPTS[language] || SYSTEM_PROMPTS["zh-TW"];
@@ -754,6 +854,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           models: [...openaiModels, ...anthropicModels],
           openaiModels,
           anthropicModels
+        });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MESSAGE_TYPES.VERIFY_MODELS) {
+    (async () => {
+      try {
+        const result = await verifyModels(message.apiKey);
+        sendResponse({
+          ok: true,
+          openaiModels: result.openaiModels,
+          anthropicModels: result.anthropicModels,
+          details: result.details
         });
       } catch (err) {
         sendResponse({ ok: false, error: err.message || String(err) });

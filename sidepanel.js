@@ -7,8 +7,13 @@ const STORAGE_KEYS = {
   messages: "messages",
   pageContent: "pageContent",
   savedPrompts: "savedPrompts",
-  panelMode: "panelMode"
+  panelMode: "panelMode",
+  verifiedModels: "verifiedModels"
 };
+
+// Special sentinel value used as a model-selector option that triggers
+// verification of all candidate models instead of selecting a model.
+const VERIFY_MODELS_ACTION = "__verify_models__";
 
 const DEFAULT_MODEL = "gpt-4.1-mini";
 const RUNTIME_MESSAGE_TIMEOUT_MS = 30000;
@@ -26,6 +31,10 @@ const TRANSLATIONS = {
     "status-clipboard-loaded": "剪貼簿已載入",
     "status-loading-models": "載入模型中...",
     "status-models-loaded": "已載入 {count} 個模型",
+    "verify-models": "🔍 驗證支援模型…",
+    "status-verifying-models": "驗證模型中，請稍候...",
+    "status-verify-done": "驗證完成：{ok} 個可用、{fail} 個不可用",
+    "error-verify-models": "模型驗證失敗：",
     "status-sending": "發送中...",
     "status-error": "發生錯誤",
     send: "發送",
@@ -93,6 +102,10 @@ const TRANSLATIONS = {
     "status-clipboard-loaded": "剪贴板已载入",
     "status-loading-models": "载入模型中...",
     "status-models-loaded": "已载入 {count} 个模型",
+    "verify-models": "🔍 验证支持模型…",
+    "status-verifying-models": "验证模型中，请稍候...",
+    "status-verify-done": "验证完成：{ok} 个可用、{fail} 个不可用",
+    "error-verify-models": "模型验证失败：",
     "status-sending": "发送中...",
     "status-error": "发生错误",
     send: "发送",
@@ -160,6 +173,10 @@ const TRANSLATIONS = {
     "status-clipboard-loaded": "Clipboard loaded",
     "status-loading-models": "Loading models...",
     "status-models-loaded": "Loaded {count} models",
+    "verify-models": "🔍 Verify models…",
+    "status-verifying-models": "Verifying models, please wait...",
+    "status-verify-done": "Verified: {ok} available, {fail} unavailable",
+    "error-verify-models": "Model verification failed: ",
     "status-sending": "Sending...",
     "status-error": "Error occurred",
     send: "Send",
@@ -269,6 +286,7 @@ let state = {
   anthropicModels: [],
   models: [],
   modelQuotas: {},
+  verifiedModels: null,
   messages: [],
   pageContent: null,
   savedPrompts: [],
@@ -393,6 +411,10 @@ function updateUILanguage() {
 
   UI.languageSelect.value = state.currentLanguage;
   updatePanelModeBtn();
+
+  // Re-render the model selector so dynamically built options (e.g. the
+  // "verify models" action) pick up the newly selected language.
+  renderModelOptions();
 }
 
 function setStatus(type, text) {
@@ -467,11 +489,11 @@ async function refreshBudget() {
     : "";
 }
 
-async function sendRuntimeMessage(payload) {
+async function sendRuntimeMessage(payload, timeoutMs = RUNTIME_MESSAGE_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const timeoutId = setTimeout(() => {
-      resolve({ ok: false, error: `Request timeout after ${RUNTIME_MESSAGE_TIMEOUT_MS}ms` });
-    }, RUNTIME_MESSAGE_TIMEOUT_MS);
+      resolve({ ok: false, error: `Request timeout after ${timeoutMs}ms` });
+    }, timeoutMs);
 
     chrome.runtime.sendMessage(payload, (response) => {
       clearTimeout(timeoutId);
@@ -744,11 +766,25 @@ function getSelectableModels() {
 function renderModelOptions() {
   UI.modelSelect.innerHTML = "";
 
+  function appendVerifyAction() {
+    const sep = document.createElement("option");
+    sep.value = "";
+    sep.disabled = true;
+    sep.textContent = "──────────";
+    UI.modelSelect.appendChild(sep);
+
+    const verify = document.createElement("option");
+    verify.value = VERIFY_MODELS_ACTION;
+    verify.textContent = t("verify-models");
+    UI.modelSelect.appendChild(verify);
+  }
+
   if (!state.models.length) {
     const option = document.createElement("option");
     option.value = DEFAULT_MODEL;
     option.textContent = `${DEFAULT_MODEL} (0/0)`;
     UI.modelSelect.appendChild(option);
+    appendVerifyAction();
     UI.modelSelect.value = DEFAULT_MODEL;
     return;
   }
@@ -784,6 +820,7 @@ function renderModelOptions() {
 
   appendModelGroup(state.openaiModels, "OpenAI");
   appendModelGroup(state.anthropicModels, "Anthropic");
+  appendVerifyAction();
 
   const selectableModels = getSelectableModels();
 
@@ -842,6 +879,7 @@ async function saveState() {
     [STORAGE_KEYS.language]: state.currentLanguage,
     [STORAGE_KEYS.savedPrompts]: state.savedPrompts,
     [STORAGE_KEYS.panelMode]: state.panelMode,
+    [STORAGE_KEYS.verifiedModels]: state.verifiedModels,
     kc_tabs: tabs,
     kc_active_tab_id: state.activeTabId,
     kc_next_tab_id: state.nextTabId,
@@ -857,6 +895,7 @@ async function initializeState() {
     STORAGE_KEYS.pageContent,
     STORAGE_KEYS.savedPrompts,
     STORAGE_KEYS.panelMode,
+    STORAGE_KEYS.verifiedModels,
     "kc_tabs",
     "kc_active_tab_id",
     "kc_next_tab_id",
@@ -870,6 +909,14 @@ async function initializeState() {
   state.selectedApiKey = isValidApiKey(selectedKey) ? selectedKey : firstStoredKey || "";
   state.openaiModels = [];
   state.anthropicModels = [];
+  const storedVerified = stored[STORAGE_KEYS.verifiedModels];
+  state.verifiedModels = (storedVerified && typeof storedVerified === "object")
+    ? {
+        openai: Array.isArray(storedVerified.openai) ? storedVerified.openai : [],
+        anthropic: Array.isArray(storedVerified.anthropic) ? storedVerified.anthropic : [],
+        verifiedAt: storedVerified.verifiedAt || null
+      }
+    : null;
   state.currentLanguage = stored[STORAGE_KEYS.language] || "zh-TW";
   state.savedPrompts = Array.isArray(stored[STORAGE_KEYS.savedPrompts]) ? stored[STORAGE_KEYS.savedPrompts] : [];
   state.panelMode = stored[STORAGE_KEYS.panelMode] || "sidepanel";
@@ -1564,6 +1611,26 @@ async function loadModels() {
     return;
   }
 
+  // Prefer previously verified models (recorded via "驗證支援模型") if present.
+  if (state.verifiedModels &&
+      (state.verifiedModels.openai?.length || state.verifiedModels.anthropic?.length)) {
+    state.openaiModels = Array.isArray(state.verifiedModels.openai) ? state.verifiedModels.openai : [];
+    state.anthropicModels = Array.isArray(state.verifiedModels.anthropic) ? state.verifiedModels.anthropic : [];
+    state.models = [...state.openaiModels, ...state.anthropicModels];
+    renderModelOptions();
+
+    if (!isGnaiKey(state.selectedApiKey)) {
+      const quotaResponse = await fetchQuotaFromApi();
+      if (quotaResponse?.ok) {
+        syncModelQuotasFromQuota(quotaResponse.quota || {});
+      }
+    }
+
+    await saveState();
+    setStatus("ready", t("status-models-loaded", { count: String(state.models.length) }));
+    return;
+  }
+
   setStatus("loading", t("status-loading-models"));
   const response = await sendRuntimeMessage({ type: "GET_MODELS", apiKey: state.selectedApiKey });
 
@@ -1590,6 +1657,43 @@ async function loadModels() {
 
   await saveState();
   setStatus("ready", t("status-models-loaded", { count: String(state.models.length) }));
+}
+
+// Probe every candidate model in models-catalog.js, record the ones that pass,
+// and use them to populate the model-selector.
+async function verifyAndLoadModels() {
+  const hasKey = await ensureApiKey(true);
+  if (!hasKey) return;
+
+  setStatus("loading", t("status-verifying-models"));
+
+  // Verification can take a while (many probes), so allow a longer timeout.
+  const response = await sendRuntimeMessage(
+    { type: "VERIFY_MODELS", apiKey: state.selectedApiKey },
+    120000
+  );
+
+  if (!response?.ok) {
+    setStatus("error", t("error-verify-models") + (response?.error || "unknown error"));
+    return;
+  }
+
+  const openaiModels = Array.isArray(response.openaiModels) ? response.openaiModels : [];
+  const anthropicModels = Array.isArray(response.anthropicModels) ? response.anthropicModels : [];
+  const details = Array.isArray(response.details) ? response.details : [];
+  const failCount = details.filter((d) => d && !d.available).length;
+
+  state.verifiedModels = { openai: openaiModels, anthropic: anthropicModels, verifiedAt: Date.now() };
+  state.openaiModels = openaiModels;
+  state.anthropicModels = anthropicModels;
+  state.models = [...openaiModels, ...anthropicModels];
+  renderModelOptions();
+
+  await saveState();
+  setStatus("ready", t("status-verify-done", {
+    ok: String(state.models.length),
+    fail: String(failCount)
+  }));
 }
 
 function openSavedPromptsModal() {
@@ -1815,6 +1919,12 @@ function setupEventHandlers() {
   });
 
   UI.modelSelect.addEventListener("change", async () => {
+    if (UI.modelSelect.value === VERIFY_MODELS_ACTION) {
+      // Restore the previously selected model in the dropdown, then verify.
+      UI.modelSelect.value = state.selectedModel;
+      await verifyAndLoadModels();
+      return;
+    }
     state.selectedModel = UI.modelSelect.value;
     if (isAnthropicModelRestricted(state.selectedModel)) {
       const selectableModels = getSelectableModels();
