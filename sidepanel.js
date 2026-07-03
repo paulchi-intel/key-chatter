@@ -89,7 +89,8 @@ const TRANSLATIONS = {
     "dialog-no": "否",
     "dialog-cancel": "取消",
     "clipboard-tab-label": "剪貼簿內容",
-    "empty-tab-label": "empty"
+    "empty-tab-label": "empty",
+    "tab-rename-hint": "雙擊可重新命名"
   },
   "zh-CN": {
     clear: "清除",
@@ -160,7 +161,8 @@ const TRANSLATIONS = {
     "dialog-no": "否",
     "dialog-cancel": "取消",
     "clipboard-tab-label": "剪贴板内容",
-    "empty-tab-label": "empty"
+    "empty-tab-label": "empty",
+    "tab-rename-hint": "双击可重新命名"
   },
   en: {
     clear: "Clear",
@@ -231,7 +233,8 @@ const TRANSLATIONS = {
     "dialog-no": "No",
     "dialog-cancel": "Cancel",
     "clipboard-tab-label": "Clipboard",
-    "empty-tab-label": "empty"
+    "empty-tab-label": "empty",
+    "tab-rename-hint": "Double-click to rename"
   }
 };
 
@@ -415,6 +418,10 @@ function updateUILanguage() {
   // Re-render the model selector so dynamically built options (e.g. the
   // "verify models" action) pick up the newly selected language.
   renderModelOptions();
+
+  // Re-render the tab bar so dynamically built labels/tooltips (e.g. the
+  // "double-click to rename" hint) pick up the newly selected language.
+  renderTabBar();
 }
 
 function setStatus(type, text) {
@@ -691,21 +698,41 @@ function hidePageInfo() {
 function renderEmptyState() {
   UI.messagesContainer.innerHTML = `
     <div class="empty-state">
-      <div class="empty-state-icon">💭</div>
+      <div class="empty-state-icon">
+        <svg class="empty-mark" viewBox="0 0 120 104" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <defs>
+            <linearGradient id="emg" x1="12" y1="10" x2="108" y2="92" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/>
+            </linearGradient>
+            <radialGradient id="eglow" cx="50%" cy="46%" r="55%">
+              <stop stop-color="#a78bfa" stop-opacity=".45"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <ellipse class="empty-glow" cx="60" cy="54" rx="52" ry="42" fill="url(#eglow)"/>
+          <g class="empty-float">
+            <path class="draw" d="M22 20h76a10 10 0 0 1 10 10v34a10 10 0 0 1-10 10H52l-19 16v-16H22a10 10 0 0 1-10-10V30a10 10 0 0 1 10-10Z" stroke="url(#emg)" stroke-width="3.5"/>
+            <circle class="empty-dot d1" cx="44" cy="47" r="4.4" fill="#3b82f6"/>
+            <circle class="empty-dot d2" cx="60" cy="47" r="4.4" fill="#7c3aed"/>
+            <circle class="empty-dot d3" cx="76" cy="47" r="4.4" fill="#8b5cf6"/>
+          </g>
+          <circle class="empty-spark s1" cx="16" cy="14" r="2.4" fill="#c4b5fd"/>
+          <circle class="empty-spark s2" cx="106" cy="16" r="2" fill="#a78bfa"/>
+        </svg>
+      </div>
       <div class="empty-state-title" data-i18n="empty-title">${t("empty-title")}</div>
       <div class="empty-state-text" data-i18n="empty-text">${t("empty-text").replace(/\n/g, "<br>")}</div>
     </div>
   `;
 }
 
-function addMessage(role, content) {
+function addMessage(role, content, animate = false) {
   const emptyState = UI.messagesContainer.querySelector(".empty-state");
   if (emptyState) {
     emptyState.remove();
   }
 
   const node = document.createElement("div");
-  node.className = `message ${role}`;
+  node.className = `message ${role}` + (animate ? " enter" : "");
 
   if (role === "assistant") {
     node.innerHTML = renderMarkdown(content || "");
@@ -715,6 +742,28 @@ function addMessage(role, content) {
 
   UI.messagesContainer.appendChild(node);
   UI.messagesContainer.scrollTop = UI.messagesContainer.scrollHeight;
+}
+
+// Assistant "thinking" bubble shown while awaiting a reply.
+function showTypingIndicator() {
+  hideTypingIndicator();
+  const emptyState = UI.messagesContainer.querySelector(".empty-state");
+  if (emptyState) emptyState.remove();
+
+  const node = document.createElement("div");
+  node.className = "message assistant typing-indicator enter";
+  node.id = "typingIndicator";
+  node.innerHTML =
+    '<svg class="typing-dots" viewBox="0 0 44 12" aria-hidden="true">' +
+    '<circle cx="6" cy="6" r="4"/><circle cx="22" cy="6" r="4"/><circle cx="38" cy="6" r="4"/>' +
+    "</svg>";
+  UI.messagesContainer.appendChild(node);
+  UI.messagesContainer.scrollTop = UI.messagesContainer.scrollHeight;
+}
+
+function hideTypingIndicator() {
+  const node = document.getElementById("typingIndicator");
+  if (node) node.remove();
 }
 
 function addSystemMessage(content) {
@@ -979,10 +1028,8 @@ async function initializeState() {
 function updatePanelModeBtn() {
   if (!UI.panelModeBtn) return;
   if (state.panelMode === "popup") {
-    UI.panelModeBtn.textContent = "◫";
     UI.panelModeBtn.title = t("panel-mode-to-sidepanel");
   } else {
-    UI.panelModeBtn.textContent = "⊞";
     UI.panelModeBtn.title = t("panel-mode-to-popup");
   }
 }
@@ -1024,6 +1071,10 @@ function commitActiveTab() {
 }
 
 function getTabLabel(tab) {
+  if (tab.customLabel) {
+    const c = tab.customLabel.trim();
+    return c.length > 14 ? c.slice(0, 14) + "\u2026" : c;
+  }
   if (tab.pageContent?.url === "clipboard://") {
     return t("clipboard-tab-label");
   }
@@ -1056,6 +1107,11 @@ function renderTabBar() {
     const label = document.createElement("span");
     label.className = "tab-label";
     label.textContent = getTabLabel(tab);
+    label.title = t("tab-rename-hint");
+    label.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      startTabRename(tab, label, btn);
+    });
     btn.appendChild(label);
 
     if (tabs.length > 1) {
@@ -1107,6 +1163,42 @@ function renderTabBar() {
   addBtn.title = "New tab";
   addBtn.addEventListener("click", addTab);
   bar.appendChild(addBtn);
+}
+
+// Inline-rename a tab: swap the label for a text input, commit on Enter/blur,
+// cancel on Escape. An empty value clears the custom label (auto label returns).
+function startTabRename(tab, label, btn) {
+  const input = document.createElement("input");
+  input.className = "tab-rename-input";
+  input.value = tab.customLabel || getTabLabel(tab);
+  input.maxLength = 40;
+  const wasDraggable = btn.draggable;
+  btn.draggable = false;
+
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = commit => {
+    if (done) return;
+    done = true;
+    btn.draggable = wasDraggable;
+    if (commit) {
+      const v = input.value.trim();
+      tab.customLabel = v || null;
+      saveState();
+    }
+    renderTabBar();
+  };
+  input.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", e => e.stopPropagation());
+  input.addEventListener("dblclick", e => e.stopPropagation());
 }
 
 async function addTab() {
@@ -1342,9 +1434,10 @@ async function sendMessage() {
   setStatus("loading", t("status-sending"));
   const srcTabId = state.activeTabId;
 
-  addMessage("user", userMessage);
+  addMessage("user", userMessage, true);
   UI.messageInput.value = "";
   UI.messageInput.style.height = "auto";
+  showTypingIndicator();
 
   try {
     const response = await sendRuntimeMessage({
@@ -1375,7 +1468,7 @@ async function sendMessage() {
       return;
     }
 
-    addMessage("assistant", response.result || "");
+    addMessage("assistant", response.result || "", true);
     state.messages.push({ role: "user", content: userMessage });
     state.messages.push({ role: "assistant", content: response.result || "" });
     state.sessionSaved = false;
@@ -1391,6 +1484,7 @@ async function sendMessage() {
   } catch (err) {
     setStatus("error", t("error-send") + (err.message || String(err)));
   } finally {
+    hideTypingIndicator();
     UI.sendBtn.disabled = false;
     UI.messageInput.disabled = false;
     UI.messageInput.focus();
@@ -1418,7 +1512,8 @@ async function handleQuickQuestion(template) {
     const srcTabId = state.activeTabId;
 
     try {
-      addMessage("user", prompt);
+      addMessage("user", prompt, true);
+      showTypingIndicator();
 
       const contextMessage = `Page Title: ${state.pageContent.title}\nPage URL: ${state.pageContent.url}\n\nPage Content:\n${state.pageContent.text}\n\n---\n\n${prompt}`;
       const response = await sendRuntimeMessage({
@@ -1447,7 +1542,7 @@ async function handleQuickQuestion(template) {
         return;
       }
 
-      addMessage("assistant", response.result || "");
+      addMessage("assistant", response.result || "", true);
       state.messages.push({ role: "user", content: prompt });
       state.messages.push({ role: "assistant", content: response.result || "" });
       state.sessionSaved = false;
@@ -1457,6 +1552,7 @@ async function handleQuickQuestion(template) {
     } catch (err) {
       setStatus("error", t("error-send") + (err.message || String(err)));
     } finally {
+      hideTypingIndicator();
       UI.sendBtn.disabled = false;
       UI.messageInput.disabled = false;
     }
@@ -1944,9 +2040,72 @@ function setupEventHandlers() {
 
   UI.sendBtn.addEventListener("click", sendMessage);
 
+  // Header cursor spotlight: a soft light that smoothly trails the pointer.
+  (() => {
+    const bar = document.querySelector(".header-bar");
+    if (!bar) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let curX = 0, curY = 0, tgtX = 0, tgtY = 0, raf = 0, lit = false;
+    const tick = () => {
+      curX += (tgtX - curX) * 0.18;
+      curY += (tgtY - curY) * 0.18;
+      bar.style.setProperty("--mx", curX + "px");
+      bar.style.setProperty("--my", curY + "px");
+      if (lit && (Math.abs(tgtX - curX) > 0.5 || Math.abs(tgtY - curY) > 0.5)) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        raf = 0;
+      }
+    };
+    bar.addEventListener("pointermove", (e) => {
+      const r = bar.getBoundingClientRect();
+      tgtX = e.clientX - r.left;
+      tgtY = e.clientY - r.top;
+      if (!raf) raf = requestAnimationFrame(tick);
+    });
+    bar.addEventListener("pointerenter", (e) => {
+      const r = bar.getBoundingClientRect();
+      curX = tgtX = e.clientX - r.left;
+      curY = tgtY = e.clientY - r.top;
+      lit = true;
+      bar.classList.add("lit");
+      if (!raf) raf = requestAnimationFrame(tick);
+    });
+    bar.addEventListener("pointerleave", () => {
+      lit = false;
+      bar.classList.remove("lit");
+    });
+  })();
+
+  // Header icon buttons: replay a small SVG state-change animation on each click.
+  [UI.clearBtn, UI.saveSessionBtn, UI.loadPageBtn, UI.loadClipboardBtn, UI.panelModeBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      btn.classList.remove("tog");
+      void btn.offsetWidth;
+      btn.classList.add("tog");
+    });
+    btn.addEventListener("animationend", () => btn.classList.remove("tog"));
+  });
+
+  // Send button press feedback: replay the squash + plane launch on each press.
+  function playSendPress() {
+    if (UI.sendBtn.disabled) return;
+    UI.sendBtn.classList.remove("go");
+    void UI.sendBtn.offsetWidth;
+    UI.sendBtn.classList.add("go");
+  }
+  UI.sendBtn.addEventListener("pointerdown", playSendPress);
+  UI.sendBtn.addEventListener("animationend", (e) => {
+    // Keep .go until the longest animation (plane-launch) finishes so it
+    // always plays out fully, even if the button was released early.
+    if (e.animationName === "plane-launch") UI.sendBtn.classList.remove("go");
+  });
+
   UI.messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      playSendPress();
       sendMessage();
     }
   });
