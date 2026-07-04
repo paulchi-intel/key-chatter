@@ -44,9 +44,20 @@ const TRANSLATIONS = {
     "system-page-loaded": "已載入網頁內容",
     "system-clipboard-loaded": "已載入剪貼簿內容",
     "quick-question-title": "快速提問",
+    "quick-question-help": "說明",
+    "qq-help-intro": "點選下方按鈕，即可用預設提示詞分析已載入的 sighting 或文件：",
     "template-concise": "簡潔摘要",
-    "template-engineering": "工程摘要",
-    "template-questions": "建議 3 個深入問題",
+    "template-keydata": "關鍵數據",
+    "template-rootcause": "根因分析",
+    "template-risk": "影響與風險",
+    "template-action": "後續行動",
+    "template-quiz": "出題考我",
+    "qq-desc-concise": "用條列快速摘要重點",
+    "qq-desc-keydata": "抽出關鍵規格、參數與數據",
+    "qq-desc-rootcause": "分析問題的根本原因",
+    "qq-desc-risk": "找出影響範圍與潛在風險",
+    "qq-desc-action": "整理後續行動與負責事項",
+    "qq-desc-quiz": "出題測驗，幫助我真正理解",
     "saved-prompts": "常用提示詞",
     "saved-prompts-title": "常用提示詞管理",
     "manage-prompts": "管理",
@@ -116,9 +127,20 @@ const TRANSLATIONS = {
     "system-page-loaded": "已载入网页内容",
     "system-clipboard-loaded": "已载入剪贴板内容",
     "quick-question-title": "快速提问",
+    "quick-question-help": "说明",
+    "qq-help-intro": "点选下方按钮，即可用预设提示词分析已载入的 sighting 或文件：",
     "template-concise": "简洁摘要",
-    "template-engineering": "工程摘要",
-    "template-questions": "建议 3 个深入问题",
+    "template-keydata": "关键数据",
+    "template-rootcause": "根因分析",
+    "template-risk": "影响与风险",
+    "template-action": "后续行动",
+    "template-quiz": "出题考我",
+    "qq-desc-concise": "用条列快速摘要重点",
+    "qq-desc-keydata": "抽出关键规格、参数与数据",
+    "qq-desc-rootcause": "分析问题的根本原因",
+    "qq-desc-risk": "找出影响范围与潜在风险",
+    "qq-desc-action": "整理后续行动与负责事项",
+    "qq-desc-quiz": "出题测验，帮助我真正理解",
     "saved-prompts": "常用提示词",
     "saved-prompts-title": "常用提示词管理",
     "manage-prompts": "管理",
@@ -162,7 +184,9 @@ const TRANSLATIONS = {
     "dialog-cancel": "取消",
     "clipboard-tab-label": "剪贴板内容",
     "empty-tab-label": "empty",
-    "tab-rename-hint": "双击可重新命名"
+    "tab-rename-hint": "双击可重新命名",
+    "copy": "复制",
+    "copied": "已复制"
   },
   en: {
     clear: "Clear",
@@ -188,9 +212,20 @@ const TRANSLATIONS = {
     "system-page-loaded": "Page content loaded",
     "system-clipboard-loaded": "Clipboard content loaded",
     "quick-question-title": "Quick Questions",
+    "quick-question-help": "Help",
+    "qq-help-intro": "Click a button to analyze the loaded sighting or document with a preset prompt:",
     "template-concise": "Concise Summary",
-    "template-engineering": "Engineering Summary",
-    "template-questions": "Suggest 3 Deep-Dive Questions",
+    "template-keydata": "Key Data",
+    "template-rootcause": "Root Cause",
+    "template-risk": "Impact & Risk",
+    "template-action": "Action Items",
+    "template-quiz": "Quiz Me",
+    "qq-desc-concise": "Quick bullet-point summary of key points",
+    "qq-desc-keydata": "Extract key specs, parameters and data",
+    "qq-desc-rootcause": "Analyze the underlying root cause",
+    "qq-desc-risk": "Identify impact scope and potential risks",
+    "qq-desc-action": "Summarize follow-up actions and owners",
+    "qq-desc-quiz": "Quiz me to reinforce understanding",
     "saved-prompts": "Saved Prompts",
     "saved-prompts-title": "Saved Prompts Manager",
     "manage-prompts": "Manage",
@@ -234,7 +269,9 @@ const TRANSLATIONS = {
     "dialog-cancel": "Cancel",
     "clipboard-tab-label": "Clipboard",
     "empty-tab-label": "empty",
-    "tab-rename-hint": "Double-click to rename"
+    "tab-rename-hint": "Double-click to rename",
+    "copy": "Copy",
+    "copied": "Copied"
   }
 };
 
@@ -736,12 +773,87 @@ function addMessage(role, content, animate = false) {
 
   if (role === "assistant") {
     node.innerHTML = renderMarkdown(content || "");
+    addCopyButton(node, content || "");
   } else {
     node.textContent = content || "";
   }
 
   UI.messagesContainer.appendChild(node);
   UI.messagesContainer.scrollTop = UI.messagesContainer.scrollHeight;
+}
+
+// Copy-to-clipboard button with animated checkmark draw-on confirmation.
+function addCopyButton(node, text) {
+  const btn = document.createElement("button");
+  btn.className = "copy-btn";
+  btn.type = "button";
+  btn.title = t("copy");
+  btn.setAttribute("aria-label", t("copy"));
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<g class="ic-copy">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2.4"/>' +
+    '<path d="M5 15V6a2 2 0 0 1 2-2h9"/>' +
+    '</g>' +
+    '<path class="ic-check" d="M5 12.5 10 17.5 19.5 7"/>' +
+    '</svg>';
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      // Build a self-contained HTML snapshot with embedded styles so that
+      // pasting into Word / Outlook / Notion preserves colours and formatting
+      // — same result as manual select-all + copy from the browser.
+      const clone = node.cloneNode(true);
+      clone.querySelector(".copy-btn")?.remove();
+
+      const styledHtml =
+        "<html><head><style>" +
+        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
+          "font-size:14px;color:#1f2937;line-height:1.5;margin:0;padding:0;}" +
+        "p{margin:0;}" +
+        "strong{font-weight:600;}" +
+        "em{font-style:italic;}" +
+        "h2{font-size:15px;font-weight:700;margin:8px 0 4px;color:#5b21b6;}" +
+        "h3{font-size:14px;font-weight:700;margin:6px 0 3px;color:#6d28d9;}" +
+        "code{background:#f3f4f6;padding:2px 6px;border-radius:4px;" +
+          "font-family:'Cascadia Code','Consolas','Courier New',monospace;" +
+          "font-size:12px;color:#6d28d9;}" +
+        "pre{background:#0b1020;color:#e2e8f0;padding:10px 12px;border-radius:8px;" +
+          "overflow-x:auto;margin:4px 0;font-size:12px;line-height:1.45;}" +
+        "pre code{background:transparent;color:inherit;padding:0;font-size:inherit;}" +
+        "ul,ol{margin:4px 0;padding-left:20px;}" +
+        "li{margin:2px 0;}" +
+        "table{border-collapse:collapse;width:100%;margin:4px 0;}" +
+        "th{background:#f9fafb;font-weight:600;}" +
+        "th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left;}" +
+        "blockquote{border-left:3px solid #e5e7eb;padding-left:12px;margin:4px 0;color:#6b7280;}" +
+        "hr{border:none;border-top:1px solid #e5e7eb;margin:8px 0;}" +
+        "</style></head><body>" +
+        clone.innerHTML +
+        "</body></html>";
+
+      const htmlBlob = new Blob([styledHtml], { type: "text/html" });
+      const textBlob = new Blob([clone.textContent || ""], { type: "text/plain" });
+
+      if (typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })
+        ]);
+      } else {
+        await navigator.clipboard.writeText(clone.textContent || "");
+      }
+
+      btn.classList.add("copied");
+      btn.title = t("copied");
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => {
+        btn.classList.remove("copied");
+        btn.title = t("copy");
+      }, 1600);
+    } catch { /* clipboard unavailable */ }
+  });
+  node.appendChild(btn);
 }
 
 // Assistant "thinking" bubble shown while awaiting a reply.
@@ -1282,6 +1394,15 @@ async function closeTab(id) {
   await saveState();
 }
 
+const QUICK_QUESTIONS = [
+  { key: "concise",   icon: `<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>` },
+  { key: "keydata",   icon: `<path d="M3 21h18"/><rect x="5" y="11" width="3.4" height="7" rx="1"/><rect x="10.3" y="6" width="3.4" height="12" rx="1"/><rect x="15.6" y="14" width="3.4" height="4" rx="1"/>` },
+  { key: "rootcause", icon: `<circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/>` },
+  { key: "risk",      icon: `<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4"/><path d="M12 17h.01"/>` },
+  { key: "action",    icon: `<path d="M9 11l3 3L20 5"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/>` },
+  { key: "quiz",      icon: `<rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 12.5l2 2 4-4.5"/>` },
+];
+
 function showQuickQuestions() {
   const existingQuick = UI.messagesContainer.querySelector(".quick-questions");
   if (existingQuick) {
@@ -1295,13 +1416,26 @@ function showQuickQuestions() {
 
   const quickNode = document.createElement("div");
   quickNode.className = "quick-questions";
+
+  const btnsHtml = QUICK_QUESTIONS.map((q) => `
+      <button class="quick-question-btn" data-template="${q.key}">
+        <svg class="qq-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${q.icon}</svg>
+        <span class="qq-label">${t("template-" + q.key)}</span>
+      </button>`).join("");
+
+  const helpHtml = QUICK_QUESTIONS.map((q) => `
+      <div class="qq-help-item"><span class="qq-help-name">${t("template-" + q.key)}</span><span class="qq-help-desc">${t("qq-desc-" + q.key)}</span></div>`).join("");
+
   quickNode.innerHTML = `
-    <div class="quick-questions-title">${t("quick-question-title")}</div>
-    <div class="quick-questions-grid">
-      <button class="quick-question-btn" data-template="concise">${t("template-concise")}</button>
-      <button class="quick-question-btn" data-template="engineering">${t("template-engineering")}</button>
-      <button class="quick-question-btn" data-template="questions">${t("template-questions")}</button>
+    <div class="quick-questions-title">
+      <span>${t("quick-question-title")}</span>
+      <button class="qq-help-btn" id="quickHelpBtn" title="${t("quick-question-help")}" aria-label="${t("quick-question-help")}">?</button>
     </div>
+    <div class="qq-help-panel" id="qqHelpPanel" hidden>
+      <div class="qq-help-intro">${t("qq-help-intro")}</div>
+      ${helpHtml}
+    </div>
+    <div class="quick-questions-grid">${btnsHtml}</div>
   `;
 
   const firstMessage = UI.messagesContainer.querySelector(".message");
@@ -1311,9 +1445,19 @@ function showQuickQuestions() {
     UI.messagesContainer.appendChild(quickNode);
   }
 
+  const helpBtn = quickNode.querySelector("#quickHelpBtn");
+  const helpPanel = quickNode.querySelector("#qqHelpPanel");
+  helpBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!helpPanel) return;
+    helpPanel.hidden = !helpPanel.hidden;
+    helpBtn.classList.toggle("on", !helpPanel.hidden);
+  });
+
   quickNode.querySelectorAll(".quick-question-btn").forEach((btn) => {
+    const template = btn.getAttribute("data-template") || "";
+    btn.title = getQuestionPrompt(template);
     btn.addEventListener("click", () => {
-      const template = btn.getAttribute("data-template") || "";
       handleQuickQuestion(template);
     });
   });
@@ -1331,15 +1475,27 @@ function showSavedPromptsSection() {
   savedNode.className = "saved-prompts-section";
 
   const listHtml = !state.savedPrompts.length
-    ? `<div class="empty-saved-prompts">${t("empty-saved-prompts")}</div>`
+    ? `<div class="empty-saved-prompts">
+         <svg class="sp-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+         <span>${t("empty-saved-prompts")}</span>
+       </div>`
     : state.savedPrompts
-      .map((prompt, index) => `<button class="saved-prompt-btn" data-index="${index}">${escapeHtml(prompt)}</button>`)
+      .map((prompt, index) => `<button class="saved-prompt-btn" data-index="${index}">
+          <svg class="sp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg>
+          <span class="sp-label">${escapeHtml(prompt)}</span>
+        </button>`)
       .join("");
 
   savedNode.innerHTML = `
     <div class="saved-prompts-header">
-      <div class="saved-prompts-title">${t("saved-prompts")}</div>
-      <button class="manage-prompts-btn" id="managePromptsBtn">${t("manage-prompts")}</button>
+      <div class="saved-prompts-title">
+        <svg class="sp-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+        <span>${t("saved-prompts")}</span>
+      </div>
+      <button class="manage-prompts-btn" id="managePromptsBtn">
+        <svg class="mp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" y1="6" x2="14" y2="6"/><line x1="10" y1="6" x2="3" y2="6"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="18" x2="16" y2="18"/><line x1="12" y1="18" x2="3" y2="18"/><line x1="14" y1="4" x2="14" y2="8"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="16" x2="16" y2="20"/></svg>
+        <span>${t("manage-prompts")}</span>
+      </button>
     </div>
     <div class="saved-prompts-list">
       ${listHtml}
@@ -1372,18 +1528,27 @@ function getQuestionPrompt(template) {
   const prompts = {
     "zh-TW": {
       concise: "請用簡短的條列式摘要載入的內容，使用繁體中文，重點放在關鍵概念上。",
-      engineering: `你是一位資深技術工程師助理。請分析載入的內容並提供結構化、專業的工程摘要。\n\n請按照以下格式回答：\n\n### 核心摘要\n2-3 句技術概述。\n\n### 關鍵資訊\n- 重點 1\n- 重點 2\n- 重點 3\n（列出 4-6 個最重要的技術要點）\n\n### 技術參數\n- 參數/數值 1\n- 參數/數值 2\n（列出關鍵參數、規格或指標，如果有的話）\n\n### 潛在問題\n- 風險/問題 1\n- 風險/問題 2\n（列出潛在風險或懸而未決的問題，如果沒有則寫「無明顯問題」）\n\n### 建議行動\n- 行動 1\n- 行動 2\n（列出 3-4 個具體的下一步驟或建議）\n\n請使用繁體中文描述，但技術術語保留英文（例如 GPU, API, PCIe, bandwidth）。`,
-      questions: "請根據載入的內容，列出 3 個深入問題，這些問題能幫助我更好地理解和分析載入的資訊。請用繁體中文回答。"
+      keydata: "請從載入的內容中，整理出關鍵的技術規格、參數、數據與設定，並以表格或條列方式呈現。若涉及版本、平台、元件、量測數值或組態，請一併列出。使用繁體中文，技術術語（例如 GPU, PCIe, BIOS, driver）保留英文。",
+      rootcause: "請針對這份 sighting／文件所描述的問題進行根因分析（root cause analysis）。請說明：(1) 問題現象與觸發條件，(2) 最可能的根本原因與推論依據，(3) 其他仍需排除的可能性。使用繁體中文，技術術語保留英文。若現有資訊不足以判斷，請明確指出還需要哪些資料或 log。",
+      risk: "請根據載入的內容，說明其影響範圍與潛在風險：(1) 受影響的元件／功能／平台，(2) 對使用者、產品或時程的影響程度，(3) 尚未解決或需特別注意的風險。使用繁體中文，技術術語保留英文。",
+      action: "請根據載入的內容，整理出後續行動項目（action items）。每一項請包含具體要做的事與目的；若文中有提到負責人、時程或 workaround（暫解方案），請一併標註。使用繁體中文。",
+      quiz: "請根據載入的內容，出幾道測驗題來考我。題目要能區分死記硬背與真正理解的差異，例如要求應用概念、分析情境或比較異同，而不是單純背誦。請一題一題來，等我回答後再出下一題，並針對我的答案給予回饋。使用繁體中文。"
     },
     "zh-CN": {
       concise: "请用简短的条列式摘要载入的内容，使用简体中文，重点放在关键概念上。",
-      engineering: `你是一位资深技术工程师助理。请分析载入的内容并提供结构化、专业的工程摘要。\n\n请按照以下格式回答：\n\n### 核心摘要\n2-3 句技术概述。\n\n### 关键信息\n- 重点 1\n- 重点 2\n- 重点 3\n（列出 4-6 个最重要的技术要点）\n\n### 技术参数\n- 参数/数值 1\n- 参数/数值 2\n（列出关键参数、规格或指标，如果有的话）\n\n### 潜在问题\n- 风险/问题 1\n- 风险/问题 2\n（列出潜在风险或悬而未决的问题，如果没有则写「无明显问题」）\n\n### 建议行动\n- 行动 1\n- 行动 2\n（列出 3-4 个具体的下一步骤或建议）\n\n请使用简体中文描述，但技术术语保留英文（例如 GPU, API, PCIe, bandwidth）。`,
-      questions: "请根据载入的内容，列出 3 个深入问题，这些问题能帮助我更好地理解和分析载入的资讯。请用简体中文回答。"
+      keydata: "请从载入的内容中，整理出关键的技术规格、参数、数据与设定，并以表格或条列方式呈现。若涉及版本、平台、元件、量测数值或配置，请一并列出。使用简体中文，技术术语（例如 GPU, PCIe, BIOS, driver）保留英文。",
+      rootcause: "请针对这份 sighting／文件所描述的问题进行根因分析（root cause analysis）。请说明：(1) 问题现象与触发条件，(2) 最可能的根本原因与推论依据，(3) 其他仍需排除的可能性。使用简体中文，技术术语保留英文。若现有信息不足以判断，请明确指出还需要哪些资料或 log。",
+      risk: "请根据载入的内容，说明其影响范围与潜在风险：(1) 受影响的元件／功能／平台，(2) 对使用者、产品或时程的影响程度，(3) 尚未解决或需特别注意的风险。使用简体中文，技术术语保留英文。",
+      action: "请根据载入的内容，整理出后续行动项目（action items）。每一项请包含具体要做的事与目的；若文中有提到负责人、时程或 workaround（暂解方案），请一并标注。使用简体中文。",
+      quiz: "请根据载入的内容，出几道测验题来考我。题目要能区分死记硬背与真正理解的差异，例如要求应用概念、分析情境或比较异同，而非单纯背诵。请一题一题来，等我回答后再出下一题，并针对我的答案给予回馈。使用简体中文。"
     },
     en: {
       concise: "Please summarize the loaded content using short bullet points in English, focusing on key concepts.",
-      engineering: `You are a senior technical engineer assistant. Analyze the loaded content and provide a structured, professional engineering summary.\n\nFormat your response EXACTLY as follows:\n\n### Core Summary\nBrief 2-3 sentence technical overview.\n\n### Key Information\n- Key point 1\n- Key point 2\n- Key point 3\n(List 4-6 most important technical points)\n\n### Technical Parameters\n- Parameter/Value 1\n- Parameter/Value 2\n(List key parameters, specifications, or metrics if present)\n\n### Potential Issues\n- Risk/Issue 1\n- Risk/Issue 2\n(List potential risks or open issues if applicable, otherwise write 'No obvious issues')\n\n### Recommended Actions\n- Action 1\n- Action 2\n(List 3-4 concrete next steps or recommendations)\n\nPlease respond in English. Keep technical terms in their standard form.`,
-      questions: "Based on the loaded content, please list 3 in-depth questions that would help me better understand and analyze the loaded information. Respond in English."
+      keydata: "From the loaded content, extract the key technical specs, parameters, data and settings, presented as a table or bullet list. Include versions, platforms, components, measured values or configurations where relevant. Respond in English.",
+      rootcause: "Perform a root-cause analysis of the issue described in this sighting/document. Explain: (1) the symptom and trigger conditions, (2) the most likely root cause and your reasoning, (3) other possibilities that still need to be ruled out. If the available information is insufficient, clearly state what additional data or logs are needed. Respond in English.",
+      risk: "Based on the loaded content, describe the impact scope and potential risks: (1) affected components/features/platforms, (2) severity of impact on users, product or schedule, (3) unresolved risks or points needing attention. Respond in English.",
+      action: "Based on the loaded content, compile the follow-up action items. For each item include the concrete task and its purpose; note the owner, timeline or any workaround if mentioned. Respond in English.",
+      quiz: "Quiz me on the loaded content. Use questions that distinguish rote memorization from real understanding (applying concepts, analyzing scenarios, comparing). Ask one at a time, wait for my answer, then give feedback before the next. Respond in English."
     }
   };
 
@@ -2044,6 +2209,14 @@ function setupEventHandlers() {
   (() => {
     const bar = document.querySelector(".header-bar");
     if (!bar) return;
+
+    // Double-click an empty area of the header (not a button/select/title)
+    // to toggle the ambient white sheen on or off.
+    bar.addEventListener("dblclick", (e) => {
+      if (e.target.closest(".header-title, .header-controls")) return;
+      bar.classList.toggle("sheen-off");
+    });
+
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let curX = 0, curY = 0, tgtX = 0, tgtY = 0, raf = 0, lit = false;
     const tick = () => {
