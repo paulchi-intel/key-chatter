@@ -1144,6 +1144,23 @@
       color: #6b7280;
     }
 
+    .modal-link {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #7c3aed;
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: color var(--d-quick) var(--e-standard),
+                  border-color var(--d-quick) var(--e-standard),
+                  transform var(--d-quick) var(--e-standard);
+    }
+    .modal-link:hover {
+      color: #6d28d9;
+      border-bottom-color: currentColor;
+      transform: translateX(2px);
+    }
+
     .modal-actions {
       margin-top: 16px;
       display: flex;
@@ -1551,6 +1568,7 @@
       <div class="modal-body">
         <p class="modal-hint" data-i18n="apikey-modal-hint">請輸入 API Key（ExpertGPT 以 pak_ 開頭，或直接輸入 GNAI Key）</p>
         <input type="text" id="apiKeyInput" class="modal-input" placeholder="pak_... 或 GNAI key" spellcheck="false" autocomplete="off" />
+        <a id="getGnaiKeyLink" class="modal-link" href="https://gnai.intel.com/auth/oauth2/sso/" target="_blank" rel="noopener noreferrer" data-i18n="apikey-get-gnai">取得 GNAI API Key ↗</a>
         <div class="modal-actions">
           <button id="apiKeyCancelBtn" class="modal-btn-cancel" data-i18n="apikey-cancel">取消</button>
           <button id="apiKeyConfirmBtn" class="modal-btn-confirm" data-i18n="apikey-confirm">確認</button>
