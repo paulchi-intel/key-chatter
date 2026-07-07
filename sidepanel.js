@@ -804,47 +804,37 @@ function addCopyButton(node, text) {
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
     try {
-      // Build a self-contained HTML snapshot with embedded styles so that
-      // pasting into Word / Outlook / Notion preserves colours and formatting
-      // — same result as manual select-all + copy from the browser.
+      // Use the same mechanism as manual selection copy: mount a hidden clone,
+      // select its contents, and let the browser's native copy pipeline handle
+      // all clipboard formats (text/html with Fragment markers, text/plain,
+      // CF_HTML for Word/Outlook, etc.).  This is identical to what the browser
+      // does when the user selects text and presses Ctrl+C, so tables, colours
+      // and all other formatting are preserved automatically.
       const clone = node.cloneNode(true);
       clone.querySelector(".copy-btn")?.remove();
 
-      const styledHtml =
-        "<html><head><style>" +
-        "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
-          "font-size:14px;color:#1f2937;line-height:1.5;margin:0;padding:0;}" +
-        "p{margin:0;}" +
-        "strong{font-weight:600;}" +
-        "em{font-style:italic;}" +
-        "h2{font-size:15px;font-weight:700;margin:8px 0 4px;color:#5b21b6;}" +
-        "h3{font-size:14px;font-weight:700;margin:6px 0 3px;color:#6d28d9;}" +
-        "code{background:#f3f4f6;padding:2px 6px;border-radius:4px;" +
-          "font-family:'Cascadia Code','Consolas','Courier New',monospace;" +
-          "font-size:12px;color:#6d28d9;}" +
-        "pre{background:#0b1020;color:#e2e8f0;padding:10px 12px;border-radius:8px;" +
-          "overflow-x:auto;margin:4px 0;font-size:12px;line-height:1.45;}" +
-        "pre code{background:transparent;color:inherit;padding:0;font-size:inherit;}" +
-        "ul,ol{margin:4px 0;padding-left:20px;}" +
-        "li{margin:2px 0;}" +
-        "table{border-collapse:collapse;width:100%;margin:4px 0;}" +
-        "th{background:#f9fafb;font-weight:600;}" +
-        "th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left;}" +
-        "blockquote{border-left:3px solid #e5e7eb;padding-left:12px;margin:4px 0;color:#6b7280;}" +
-        "hr{border:none;border-top:1px solid #e5e7eb;margin:8px 0;}" +
-        "</style></head><body>" +
-        clone.innerHTML +
-        "</body></html>";
+      const temp = document.createElement("div");
+      temp.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0;pointer-events:none;white-space:pre-wrap;";
+      temp.appendChild(clone);
+      document.body.appendChild(temp);
 
-      const htmlBlob = new Blob([styledHtml], { type: "text/html" });
-      const textBlob = new Blob([clone.textContent || ""], { type: "text/plain" });
+      const range = document.createRange();
+      range.selectNodeContents(temp);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
 
-      if (typeof ClipboardItem !== "undefined") {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })
-        ]);
-      } else {
-        await navigator.clipboard.writeText(clone.textContent || "");
+      let ok = false;
+      try {
+        ok = document.execCommand("copy");
+      } finally {
+        sel.removeAllRanges();
+        document.body.removeChild(temp);
+      }
+
+      // execCommand fallback: if somehow unavailable, use writeText
+      if (!ok) {
+        await navigator.clipboard.writeText(node.textContent || "");
       }
 
       btn.classList.add("copied");
