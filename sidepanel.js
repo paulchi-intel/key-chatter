@@ -32,9 +32,19 @@ const TRANSLATIONS = {
     "status-loading-models": "載入模型中...",
     "status-models-loaded": "已載入 {count} 個模型",
     "verify-models": "🔍 驗證支援模型…",
+    "status-fetching-model-docs": "正在讀取 GNAI 模型文件...",
     "status-verifying-models": "驗證模型中，請稍候...",
     "status-verify-done": "驗證完成：{ok} 個可用、{fail} 個不可用",
     "error-verify-models": "模型驗證失敗：",
+    "model-discovery-title": "GNAI 模型驗證",
+    "model-discovery-source": "模型來源文件 ↗",
+    "model-discovery-found": "從文件取得 {count} 個候選模型，正在逐一驗證。",
+    "model-discovery-progress": "已驗證 {done}/{count} 個模型。",
+    "model-discovery-done": "驗證完成：{ok} 個可用、{fail} 個不可用。",
+    "model-discovery-error": "無法完成模型驗證：{error}",
+    "model-status-pending": "待驗證",
+    "model-status-available": "可用",
+    "model-status-unavailable": "不可用",
     "status-sending": "發送中...",
     "status-error": "發生錯誤",
     send: "發送",
@@ -116,9 +126,19 @@ const TRANSLATIONS = {
     "status-loading-models": "载入模型中...",
     "status-models-loaded": "已载入 {count} 个模型",
     "verify-models": "🔍 验证支持模型…",
+    "status-fetching-model-docs": "正在读取 GNAI 模型文档...",
     "status-verifying-models": "验证模型中，请稍候...",
     "status-verify-done": "验证完成：{ok} 个可用、{fail} 个不可用",
     "error-verify-models": "模型验证失败：",
+    "model-discovery-title": "GNAI 模型验证",
+    "model-discovery-source": "模型来源文档 ↗",
+    "model-discovery-found": "从文档取得 {count} 个候选模型，正在逐一验证。",
+    "model-discovery-progress": "已验证 {done}/{count} 个模型。",
+    "model-discovery-done": "验证完成：{ok} 个可用、{fail} 个不可用。",
+    "model-discovery-error": "无法完成模型验证：{error}",
+    "model-status-pending": "待验证",
+    "model-status-available": "可用",
+    "model-status-unavailable": "不可用",
     "status-sending": "发送中...",
     "status-error": "发生错误",
     send: "发送",
@@ -202,9 +222,19 @@ const TRANSLATIONS = {
     "status-loading-models": "Loading models...",
     "status-models-loaded": "Loaded {count} models",
     "verify-models": "🔍 Verify models…",
+    "status-fetching-model-docs": "Reading the GNAI model documentation...",
     "status-verifying-models": "Verifying models, please wait...",
     "status-verify-done": "Verified: {ok} available, {fail} unavailable",
     "error-verify-models": "Model verification failed: ",
+    "model-discovery-title": "GNAI model verification",
+    "model-discovery-source": "Model source documentation ↗",
+    "model-discovery-found": "Found {count} candidate models in the documentation. Verifying each model.",
+    "model-discovery-progress": "Verified {done}/{count} models.",
+    "model-discovery-done": "Verification complete: {ok} available, {fail} unavailable.",
+    "model-discovery-error": "Unable to complete model verification: {error}",
+    "model-status-pending": "Pending",
+    "model-status-available": "Available",
+    "model-status-unavailable": "Unavailable",
     "status-sending": "Sending...",
     "status-error": "Error occurred",
     send: "Send",
@@ -293,6 +323,10 @@ const UI = {
   messageInput: document.getElementById("messageInput"),
   sendBtn: document.getElementById("sendBtn"),
   modelSelect: document.getElementById("modelSelect"),
+  modelDiscoveryModal: document.getElementById("modelDiscoveryModal"),
+  closeModelDiscoveryModal: document.getElementById("closeModelDiscoveryModal"),
+  modelDiscoverySummary: document.getElementById("modelDiscoverySummary"),
+  modelDiscoveryList: document.getElementById("modelDiscoveryList"),
   savedPromptsModal: document.getElementById("savedPromptsModal"),
   savedPromptsList: document.getElementById("savedPromptsList"),
   closeSavedPromptsModal: document.getElementById("closeSavedPromptsModal"),
@@ -337,6 +371,14 @@ let state = {
   sessionSaved: false,
   activeTabId: 0,
   nextTabId: 1,
+};
+
+const modelDiscoveryState = {
+  models: [],
+  details: [],
+  verificationId: "",
+  phase: "idle",
+  error: ""
 };
 
 function t(key, params = {}) {
@@ -462,6 +504,7 @@ function updateUILanguage() {
   // Re-render the tab bar so dynamically built labels/tooltips (e.g. the
   // "double-click to rename" hint) pick up the newly selected language.
   renderTabBar();
+  renderModelDiscovery();
 }
 
 function setStatus(type, text) {
@@ -1913,22 +1956,138 @@ async function loadModels() {
   setStatus("ready", t("status-models-loaded", { count: String(state.models.length) }));
 }
 
-// Probe every candidate model in models-catalog.js, record the ones that pass,
-// and use them to populate the model-selector.
+function renderModelDiscovery() {
+  if (!UI.modelDiscoverySummary || !UI.modelDiscoveryList) return;
+
+  const detailsByModel = new Map(
+    modelDiscoveryState.details
+      .filter((detail) => detail?.model)
+      .map((detail) => [detail.model, detail])
+  );
+  const availableCount = modelDiscoveryState.details.filter((detail) => detail?.available).length;
+  const unavailableCount = modelDiscoveryState.details.filter((detail) => detail && !detail.available).length;
+
+  if (modelDiscoveryState.phase === "error") {
+    UI.modelDiscoverySummary.textContent = t("model-discovery-error", {
+      error: modelDiscoveryState.error || "unknown error"
+    });
+  } else if (modelDiscoveryState.phase === "done") {
+    UI.modelDiscoverySummary.textContent = t("model-discovery-done", {
+      ok: String(availableCount),
+      fail: String(unavailableCount)
+    });
+  } else if (modelDiscoveryState.phase === "verifying") {
+    UI.modelDiscoverySummary.textContent = t("model-discovery-progress", {
+      done: String(modelDiscoveryState.details.length),
+      count: String(modelDiscoveryState.models.length)
+    });
+  } else if (modelDiscoveryState.models.length > 0) {
+    UI.modelDiscoverySummary.textContent = t("model-discovery-found", {
+      count: String(modelDiscoveryState.models.length)
+    });
+  } else {
+    UI.modelDiscoverySummary.textContent = "";
+  }
+
+  UI.modelDiscoveryList.replaceChildren();
+  modelDiscoveryState.models.forEach((model) => {
+    const detail = detailsByModel.get(model);
+    const row = document.createElement("div");
+    row.className = "model-discovery-row";
+
+    const name = document.createElement("span");
+    name.className = "model-discovery-name";
+    name.textContent = model;
+
+    const status = document.createElement("span");
+    status.className = "model-discovery-status";
+    if (!detail) {
+      status.textContent = t("model-status-pending");
+    } else if (detail.available) {
+      status.classList.add("available");
+      status.textContent = t("model-status-available");
+    } else {
+      status.classList.add("unavailable");
+      status.textContent = t("model-status-unavailable");
+      status.title = detail.error || (detail.status ? `HTTP ${detail.status}` : "");
+    }
+
+    row.append(name, status);
+    UI.modelDiscoveryList.appendChild(row);
+  });
+}
+
+function updateModelVerificationProgress(message) {
+  if (message?.verificationId !== modelDiscoveryState.verificationId) return;
+
+  const detail = message?.detail;
+  if (!detail?.model || !modelDiscoveryState.models.includes(detail.model)) return;
+
+  const index = modelDiscoveryState.details.findIndex((item) => item?.model === detail.model);
+  if (index >= 0) {
+    modelDiscoveryState.details[index] = detail;
+  } else {
+    modelDiscoveryState.details.push(detail);
+  }
+  renderModelDiscovery();
+}
+
+function openModelDiscoveryModal() {
+  renderModelDiscovery();
+  UI.modelDiscoveryModal.classList.add("show");
+}
+
+function closeModelDiscoveryModal() {
+  UI.modelDiscoveryModal.classList.remove("show");
+}
+
+// Fetch the current candidates from the GNAI documentation, probe the models,
+// and use the available ones to populate the model selector.
 async function verifyAndLoadModels() {
   const hasKey = await ensureApiKey(true);
   if (!hasKey) return;
 
+  modelDiscoveryState.models = [];
+  modelDiscoveryState.details = [];
+  modelDiscoveryState.verificationId = globalThis.crypto?.randomUUID?.()
+    || `verify-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  modelDiscoveryState.phase = "loading";
+  modelDiscoveryState.error = "";
+  setStatus("loading", t("status-fetching-model-docs"));
+
+  const discovery = await sendRuntimeMessage({ type: "DISCOVER_MODELS" }, 60000);
+  if (!discovery?.ok) {
+    const error = discovery?.error || "unknown error";
+    modelDiscoveryState.phase = "error";
+    modelDiscoveryState.error = error;
+    openModelDiscoveryModal();
+    setStatus("error", t("error-verify-models") + error);
+    return;
+  }
+
+  const candidateModels = Array.isArray(discovery.models) ? discovery.models : [];
+  modelDiscoveryState.models = candidateModels;
+  modelDiscoveryState.phase = "verifying";
+  openModelDiscoveryModal();
   setStatus("loading", t("status-verifying-models"));
 
   // Verification can take a while (many probes), so allow a longer timeout.
   const response = await sendRuntimeMessage(
-    { type: "VERIFY_MODELS", apiKey: state.selectedApiKey },
-    120000
+    {
+      type: "VERIFY_MODELS",
+      apiKey: state.selectedApiKey,
+      models: candidateModels,
+      verificationId: modelDiscoveryState.verificationId
+    },
+    300000
   );
 
   if (!response?.ok) {
-    setStatus("error", t("error-verify-models") + (response?.error || "unknown error"));
+    const error = response?.error || "unknown error";
+    modelDiscoveryState.phase = "error";
+    modelDiscoveryState.error = error;
+    renderModelDiscovery();
+    setStatus("error", t("error-verify-models") + error);
     return;
   }
 
@@ -1936,6 +2095,9 @@ async function verifyAndLoadModels() {
   const anthropicModels = Array.isArray(response.anthropicModels) ? response.anthropicModels : [];
   const details = Array.isArray(response.details) ? response.details : [];
   const failCount = details.filter((d) => d && !d.available).length;
+  modelDiscoveryState.details = details;
+  modelDiscoveryState.phase = "done";
+  renderModelDiscovery();
 
   state.verifiedModels = { openai: openaiModels, anthropic: anthropicModels, verifiedAt: Date.now() };
   state.openaiModels = openaiModels;
@@ -2153,6 +2315,12 @@ async function downloadSession() {
 }
 
 function setupEventHandlers() {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "MODEL_VERIFICATION_PROGRESS") {
+      updateModelVerificationProgress(message);
+    }
+  });
+
   UI.languageSelect.addEventListener("change", async () => {
     state.currentLanguage = UI.languageSelect.value;
     updateUILanguage();
@@ -2279,6 +2447,11 @@ function setupEventHandlers() {
   UI.messageInput.addEventListener("input", () => {
     UI.messageInput.style.height = "auto";
     UI.messageInput.style.height = `${UI.messageInput.scrollHeight}px`;
+  });
+
+  UI.closeModelDiscoveryModal.addEventListener("click", closeModelDiscoveryModal);
+  UI.modelDiscoveryModal.addEventListener("click", (event) => {
+    if (event.target === UI.modelDiscoveryModal) closeModelDiscoveryModal();
   });
 
   UI.closeSavedPromptsModal.addEventListener("click", closeSavedPromptsModal);

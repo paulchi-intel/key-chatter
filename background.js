@@ -1,14 +1,13 @@
 // background.js (service worker, MV3)
 // ExpertGPT API bridge for chat + personal quota
 
-import { CANDIDATE_MODELS } from "./models-catalog.js";
-
 const OPENAI_BASE_URL = "https://expertgpt.intel.com/v1";
 const ANTHROPIC_BASE_URL = "https://expertgpt.intel.com/anthropic/v1";
 const GNAI_OPENAI_BASE_URL = "https://gnai.intel.com/api/providers/openai/v1";
 const GNAI_ANTHROPIC_BASE_URL = "https://gnai.intel.com/api/providers/anthropic";
 const GNAI_USER_API_URL = "https://gnai.intel.com/api/user";
 const REQUEST_TIMEOUT_MS = 30000;
+const GNAI_MODELS_DOC_URL = "https://gpusw-docs.intel.com/services/gnai/models/";
 
 const GNAI_OPENAI_MODELS = ["gpt-4o", "gpt-4.1", "gpt-5-mini", "gpt-5-nano", "o3-mini"];
 const GNAI_ANTHROPIC_MODELS = ["claude-4-6-opus", "claude-4-6-sonnet", "claude-4-5-opus", "claude-4-5-sonnet", "claude-4-5-haiku"];
@@ -23,6 +22,7 @@ function isAnthropicModel(model) {
 
 const MESSAGE_TYPES = {
   GET_MODELS: "GET_MODELS",
+  DISCOVER_MODELS: "DISCOVER_MODELS",
   GET_PAGE_CONTENT: "GET_PAGE_CONTENT",
   CHAT: "CHAT",
   GET_QUOTA: "GET_QUOTA",
@@ -696,6 +696,83 @@ async function fetchAnthropicModels(apiKey) {
 // report which ones are actually available on the current API key/endpoint.
 // ─────────────────────────────────────────────────────────────────────────
 
+function decodeHtmlText(html) {
+  const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return String(html || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, number) => String.fromCodePoint(parseInt(number, 10)))
+    .replace(/&([a-z]+);/gi, (match, name) => named[name.toLowerCase()] ?? match)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseModelsFromDocumentation(html) {
+  const tables = Array.from(String(html || "").matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi));
+
+  for (const tableMatch of tables) {
+    const rows = Array.from(tableMatch[1].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi));
+    let modelColumn = -1;
+    let headerRow = -1;
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const headers = Array.from(rows[rowIndex][1].matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gi))
+        .map((match) => decodeHtmlText(match[1]).toLowerCase());
+      const index = headers.indexOf("model");
+      if (index >= 0) {
+        modelColumn = index;
+        headerRow = rowIndex;
+        break;
+      }
+    }
+
+    if (modelColumn < 0) continue;
+
+    const models = [];
+    for (let rowIndex = headerRow + 1; rowIndex < rows.length; rowIndex += 1) {
+      const cells = Array.from(rows[rowIndex][1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi));
+      if (modelColumn >= cells.length) continue;
+      const model = decodeHtmlText(cells[modelColumn][1]);
+      if (/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(model)) models.push(model);
+    }
+
+    const uniqueModels = [...new Set(models)];
+    if (uniqueModels.length > 0) return uniqueModels;
+  }
+
+  throw new Error("The GNAI documentation does not contain a table with a usable Model column");
+}
+
+async function discoverModelsFromDocumentation() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(GNAI_MODELS_DOC_URL, {
+      headers: { Accept: "text/html" },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`Model documentation request failed (${response.status})`);
+    }
+    const models = parseModelsFromDocumentation(await response.text());
+    return {
+      models,
+      openaiModels: models.filter((model) => !isAnthropicModel(model)),
+      anthropicModels: models.filter(isAnthropicModel),
+      sourceUrl: GNAI_MODELS_DOC_URL
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Model documentation request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Fetch without throwing on non-2xx, so we can inspect the status code.
 async function probeFetch(url, apiKey, body) {
   const controller = new AbortController();
@@ -761,10 +838,17 @@ async function probeModel(apiKey, model) {
 }
 
 // Run probes with limited concurrency to avoid hammering the API.
-async function verifyModels(apiKey) {
+async function verifyModels(apiKey, candidateModels, onProgress = null) {
   assertApiKey(apiKey);
-  const openaiCandidates = Array.isArray(CANDIDATE_MODELS.openai) ? CANDIDATE_MODELS.openai : [];
-  const anthropicCandidates = Array.isArray(CANDIDATE_MODELS.anthropic) ? CANDIDATE_MODELS.anthropic : [];
+  const candidates = [...new Set(
+    (Array.isArray(candidateModels) ? candidateModels : [])
+      .map((model) => String(model || "").trim())
+      .filter((model) => /^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(model))
+  )].slice(0, 100);
+  if (candidates.length === 0) throw new Error("No candidate models were provided for verification");
+
+  const openaiCandidates = candidates.filter((model) => !isAnthropicModel(model));
+  const anthropicCandidates = candidates.filter(isAnthropicModel);
   const all = [...openaiCandidates, ...anthropicCandidates];
 
   const CONCURRENCY = 6;
@@ -775,6 +859,7 @@ async function verifyModels(apiKey) {
     while (cursor < all.length) {
       const index = cursor++;
       results[index] = await probeModel(apiKey, all[index]);
+      try { onProgress?.(results[index]); } catch (_error) { /* UI progress is best-effort. */ }
     }
   }
 
@@ -836,6 +921,18 @@ async function fetchPersonalQuota(apiKey) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MESSAGE_TYPES.DISCOVER_MODELS) {
+    (async () => {
+      try {
+        const result = await discoverModelsFromDocumentation();
+        sendResponse({ ok: true, ...result });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === MESSAGE_TYPES.GET_MODELS) {
     (async () => {
       try {
@@ -865,7 +962,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MESSAGE_TYPES.VERIFY_MODELS) {
     (async () => {
       try {
-        const result = await verifyModels(message.apiKey);
+        const result = await verifyModels(message.apiKey, message.models, (detail) => {
+          try {
+            const pending = chrome.runtime.sendMessage({
+              type: "MODEL_VERIFICATION_PROGRESS",
+              verificationId: message.verificationId || "",
+              detail
+            });
+            pending?.catch?.(() => {});
+          } catch (_error) {
+            // The panel may have closed while verification was running.
+          }
+        });
         sendResponse({
           ok: true,
           openaiModels: result.openaiModels,

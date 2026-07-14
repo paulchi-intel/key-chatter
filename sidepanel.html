@@ -1161,6 +1161,56 @@
       transform: translateX(2px);
     }
 
+    .model-discovery-content {
+      width: min(560px, calc(100vw - 32px));
+      max-height: min(720px, calc(100vh - 48px));
+    }
+
+    .model-discovery-summary {
+      margin: 0 0 6px;
+      color: #4b5563;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .model-discovery-list {
+      max-height: min(480px, calc(100vh - 230px));
+      margin-top: 12px;
+      overflow-y: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+
+    .model-discovery-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 36px;
+      padding: 7px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 12px;
+    }
+
+    .model-discovery-row:last-child { border-bottom: 0; }
+
+    .model-discovery-name {
+      min-width: 0;
+      flex: 1;
+      overflow-wrap: anywhere;
+      color: #111827;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    .model-discovery-status {
+      flex: 0 0 auto;
+      color: #6b7280;
+      font-weight: 600;
+    }
+
+    .model-discovery-status.available { color: #047857; }
+    .model-discovery-status.unavailable { color: #b91c1c; }
+
     .modal-actions {
       margin-top: 16px;
       display: flex;
@@ -1558,6 +1608,20 @@
       </div>
     </div>
   </section>
+
+  <div id="modelDiscoveryModal" class="modal">
+    <div class="modal-content model-discovery-content">
+      <div class="modal-header">
+        <h3 data-i18n="model-discovery-title">GNAI 模型驗證</h3>
+        <button class="modal-close" id="closeModelDiscoveryModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="model-discovery-summary" id="modelDiscoverySummary"></p>
+        <a class="modal-link" href="https://gpusw-docs.intel.com/services/gnai/models/#models" target="_blank" rel="noopener noreferrer" data-i18n="model-discovery-source">模型來源文件 ↗</a>
+        <div class="model-discovery-list" id="modelDiscoveryList"></div>
+      </div>
+    </div>
+  </div>
 
   <div id="apiKeyModal" class="modal">
     <div class="modal-content">
