@@ -121,6 +121,12 @@
     .header-title:hover { opacity: 0.92; transform: translateY(-1px); }
     .header-title:active { transform: translateY(0) scale(0.98); }
 
+    .app-version {
+      font-size: 10px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.78);
+    }
+
     /* Animated brand mark (line-art key that draws itself in + pulsing sparkles) */
     .brand-mark {
       width: 22px;
@@ -281,6 +287,46 @@
       gap: 8px;
     }
 
+    .update-banner {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .update-banner[hidden] { display: none; }
+    .update-banner svg { width: 16px; height: 16px; flex: 0 0 16px; }
+    .update-message { min-width: 0; flex: 1; }
+    .update-link {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .update-link:hover { background: #1d4ed8; }
+    .update-dismiss {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #1e40af;
+      font: inherit;
+      font-size: 17px;
+      line-height: 24px;
+      cursor: pointer;
+    }
+    .update-dismiss:hover { background: #dbeafe; }
+
     .status-indicator {
       position: relative;
       width: 14px;
@@ -401,6 +447,50 @@
       flex-direction: column;
       gap: 12px;
       min-height: 0;
+    }
+
+    .layout-resizer {
+      position: relative;
+      z-index: 5;
+      width: 100%;
+      height: 9px;
+      flex: 0 0 9px;
+      border: 0;
+      padding: 0;
+      background: #fff;
+      cursor: row-resize;
+      touch-action: none;
+      outline: none;
+    }
+
+    .layout-resizer::before {
+      content: "";
+      position: absolute;
+      top: 4px;
+      right: 0;
+      left: 0;
+      height: 1px;
+      background: #d1d5db;
+      transition: height 80ms var(--e-standard),
+                  background-color 80ms var(--e-standard);
+    }
+
+    .layout-resizer:hover::before,
+    .layout-resizer:focus-visible::before,
+    .layout-resizer.active::before {
+      top: 3px;
+      height: 3px;
+      background: #3b82f6;
+    }
+
+    .layout-resizer:focus-visible {
+      box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.22);
+    }
+
+    body.resizing-layout,
+    body.resizing-layout * {
+      cursor: row-resize !important;
+      user-select: none !important;
     }
 
     .message {
@@ -854,18 +944,32 @@
       background: white;
       border-top: 1px solid #e5e7eb;
       display: flex;
+      align-items: stretch;
       gap: 8px;
+      min-height: 66px;
+      max-height: 65%;
+      flex: 0 0 auto;
+      overflow: hidden;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .layout-resizer::before { transition: none; }
     }
 
     #messageInput {
-      width: 100%;
+      width: auto;
+      min-width: 0;
+      flex: 1;
       padding: 10px 14px;
       border: 2px solid #e5e7eb;
       border-radius: 8px;
       font-size: 14px;
       font-family: inherit;
       resize: none;
-      max-height: 120px;
+      height: auto;
+      max-height: none;
+      align-self: stretch;
+      overflow-y: auto;
       transition: border-color 0.2s;
       min-height: 42px;
     }
@@ -1398,10 +1502,40 @@
       background: #fff;
       border-bottom: 2px solid #e5e7eb;
       flex-shrink: 0;
-      overflow-x: auto;
-      scrollbar-width: none;
+      overflow: hidden;
     }
-    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab-scroll-viewport {
+      min-width: 0;
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      scroll-behavior: smooth;
+    }
+    .tab-scroll-viewport::-webkit-scrollbar { display: none; }
+    .tab-strip {
+      display: flex;
+      align-items: stretch;
+      min-width: max-content;
+      height: 100%;
+    }
+    .tab-scroll-btn {
+      width: 28px;
+      min-width: 28px;
+      padding: 0;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      background: #fff;
+      color: #6b7280;
+      font: inherit;
+      font-size: 18px;
+      cursor: pointer;
+      z-index: 2;
+    }
+    .tab-scroll-btn:hover:not(:disabled) { background: #eef2ff; color: #3b82f6; }
+    .tab-scroll-btn:disabled { cursor: default; color: #d1d5db; }
+    .tab-scroll-btn.no-overflow { display: none; }
     .tab-item {
       display: flex;
       align-items: center;
@@ -1524,6 +1658,7 @@
         <circle class="bm-node n2" cx="24" cy="6" r="1.4" fill="#e9d5ff"/>
       </svg>
       <span>Key Chatter</span>
+      <span class="app-version" id="extensionVersion"></span>
     </div>
     <div class="header-controls">
       <button class="icon-btn clear-btn" id="clearBtn" data-i18n-title="clear" title="清除">
@@ -1569,6 +1704,13 @@
     </div>
   </div>
 
+  <aside class="update-banner" id="updateBanner" role="status" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    <span class="update-message" id="updateMessage"></span>
+    <a class="update-link" id="updateLink" href="https://github.com/paulchi-intel/key-chatter/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="update-download">下載最新版</a>
+    <button class="update-dismiss" id="updateDismissBtn" type="button" data-i18n-title="update-dismiss" data-i18n-aria-label="update-dismiss" title="忽略此版本" aria-label="忽略此版本">×</button>
+  </aside>
+
   <div class="status-bar">
     <span class="status-indicator" id="statusIndicator">
       <span class="status-dot"></span>
@@ -1593,7 +1735,9 @@
         </div>
       </div>
 
-      <div class="input-container">
+      <div class="layout-resizer" id="chatLayoutResizer" role="separator" tabindex="0" aria-orientation="horizontal" aria-controls="messagesContainer inputContainer" aria-valuemin="15" aria-valuemax="65" aria-valuenow="0" data-i18n-title="resize-chat-layout" data-i18n-aria-label="resize-chat-layout" title="拖曳或使用方向鍵調整對話與輸入區比例" aria-label="拖曳或使用方向鍵調整對話與輸入區比例"></div>
+
+      <div class="input-container" id="inputContainer">
         <textarea id="messageInput" rows="1" data-i18n-placeholder="input-placeholder" placeholder="輸入您的問題..."></textarea>
         <button id="sendBtn">
           <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

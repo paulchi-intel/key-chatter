@@ -8,7 +8,9 @@ const STORAGE_KEYS = {
   pageContent: "pageContent",
   savedPrompts: "savedPrompts",
   panelMode: "panelMode",
-  verifiedModels: "verifiedModels"
+  verifiedModels: "verifiedModels",
+  dismissedUpdateVersion: "dismissedUpdateVersion",
+  chatComposerRatio: "chatComposerRatio"
 };
 
 // Special sentinel value used as a model-selector option that triggers
@@ -22,9 +24,14 @@ const ALLOWED_ANTHROPIC_MODEL_PREFIXES = [];
 const TRANSLATIONS = {
   "zh-TW": {
     clear: "清除",
+    "current-version": "目前版本 v{version}",
+    "update-available": "發現新版本：Key Chatter v{version}",
+    "update-download": "下載最新版",
+    "update-dismiss": "忽略此版本",
     "load-page": "載入網頁",
     "load-clipboard": "載入剪貼簿",
     "status-ready": "準備就緒",
+    "resize-chat-layout": "拖曳或使用方向鍵調整對話與輸入區比例",
     "status-loading-page": "載入網頁中...",
     "status-loading-clipboard": "載入剪貼簿中...",
     "status-page-loaded": "網頁已載入",
@@ -112,13 +119,21 @@ const TRANSLATIONS = {
     "dialog-cancel": "取消",
     "clipboard-tab-label": "剪貼簿內容",
     "empty-tab-label": "empty",
-    "tab-rename-hint": "雙擊可重新命名"
+    "tab-rename-hint": "雙擊可重新命名",
+    "new-tab": "新增分頁",
+    "tab-scroll-left": "向左捲動分頁",
+    "tab-scroll-right": "向右捲動分頁"
   },
   "zh-CN": {
     clear: "清除",
+    "current-version": "当前版本 v{version}",
+    "update-available": "发现新版本：Key Chatter v{version}",
+    "update-download": "下载最新版",
+    "update-dismiss": "忽略此版本",
     "load-page": "载入网页",
     "load-clipboard": "载入剪贴板",
     "status-ready": "准备就绪",
+    "resize-chat-layout": "拖动或使用方向键调整对话与输入区比例",
     "status-loading-page": "载入网页中...",
     "status-loading-clipboard": "载入剪贴板中...",
     "status-page-loaded": "网页已载入",
@@ -207,14 +222,22 @@ const TRANSLATIONS = {
     "clipboard-tab-label": "剪贴板内容",
     "empty-tab-label": "empty",
     "tab-rename-hint": "双击可重新命名",
+    "new-tab": "新建标签页",
+    "tab-scroll-left": "向左滚动标签页",
+    "tab-scroll-right": "向右滚动标签页",
     "copy": "复制",
     "copied": "已复制"
   },
   en: {
     clear: "Clear",
+    "current-version": "Current version v{version}",
+    "update-available": "New version available: Key Chatter v{version}",
+    "update-download": "Download latest",
+    "update-dismiss": "Dismiss this version",
     "load-page": "Load Page",
     "load-clipboard": "Load Clipboard",
     "status-ready": "Ready",
+    "resize-chat-layout": "Drag or use the arrow keys to resize the conversation and composer",
     "status-loading-page": "Loading page...",
     "status-loading-clipboard": "Loading clipboard...",
     "status-page-loaded": "Page loaded",
@@ -303,6 +326,9 @@ const TRANSLATIONS = {
     "clipboard-tab-label": "Clipboard",
     "empty-tab-label": "empty",
     "tab-rename-hint": "Double-click to rename",
+    "new-tab": "New tab",
+    "tab-scroll-left": "Scroll tabs left",
+    "tab-scroll-right": "Scroll tabs right",
     "copy": "Copy",
     "copied": "Copied"
   }
@@ -310,6 +336,11 @@ const TRANSLATIONS = {
 
 const UI = {
   headerTitle: document.getElementById("headerTitle"),
+  extensionVersion: document.getElementById("extensionVersion"),
+  updateBanner: document.getElementById("updateBanner"),
+  updateMessage: document.getElementById("updateMessage"),
+  updateLink: document.getElementById("updateLink"),
+  updateDismissBtn: document.getElementById("updateDismissBtn"),
   panelModeBtn: document.getElementById("panelModeBtn"),
   clearBtn: document.getElementById("clearBtn"),
   saveSessionBtn: document.getElementById("saveSessionBtn"),
@@ -320,6 +351,9 @@ const UI = {
   statusText: document.getElementById("statusText"),
   budgetText: document.getElementById("budgetText"),
   messagesContainer: document.getElementById("messagesContainer"),
+  chatContainer: document.querySelector(".chat-container"),
+  inputContainer: document.getElementById("inputContainer"),
+  chatLayoutResizer: document.getElementById("chatLayoutResizer"),
   messageInput: document.getElementById("messageInput"),
   sendBtn: document.getElementById("sendBtn"),
   modelSelect: document.getElementById("modelSelect"),
@@ -371,6 +405,7 @@ let state = {
   sessionSaved: false,
   activeTabId: 0,
   nextTabId: 1,
+  chatComposerRatio: null,
 };
 
 const modelDiscoveryState = {
@@ -380,6 +415,8 @@ const modelDiscoveryState = {
   phase: "idle",
   error: ""
 };
+
+let availableUpdate = null;
 
 function t(key, params = {}) {
   let text = TRANSLATIONS[state.currentLanguage]?.[key] || key;
@@ -494,8 +531,15 @@ function updateUILanguage() {
     element.title = t(key);
   });
 
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+    const key = element.getAttribute("data-i18n-aria-label");
+    if (!key) return;
+    element.setAttribute("aria-label", t(key));
+  });
+
   UI.languageSelect.value = state.currentLanguage;
   updatePanelModeBtn();
+  renderUpdateBanner();
 
   // Re-render the model selector so dynamically built options (e.g. the
   // "verify models" action) pick up the newly selected language.
@@ -595,6 +639,180 @@ async function sendRuntimeMessage(payload, timeoutMs = RUNTIME_MESSAGE_TIMEOUT_M
 
       resolve(response || { ok: false, error: "No response from background" });
     });
+  });
+}
+
+function renderInstalledVersion() {
+  const version = chrome.runtime.getManifest().version;
+  UI.extensionVersion.textContent = `v${version}`;
+  UI.extensionVersion.title = t("current-version", { version });
+}
+
+function renderUpdateBanner() {
+  renderInstalledVersion();
+  if (!availableUpdate?.latestVersion) {
+    UI.updateBanner.hidden = true;
+    return;
+  }
+
+  UI.updateMessage.textContent = t("update-available", { version: availableUpdate.latestVersion });
+  UI.updateLink.href = availableUpdate.releaseUrl;
+  UI.updateBanner.hidden = false;
+}
+
+async function checkForExtensionUpdate(force = false) {
+  renderInstalledVersion();
+  const result = await sendRuntimeMessage({ type: "CHECK_EXTENSION_UPDATE", force });
+  if (!result?.ok || !result.updateAvailable || !result.latestVersion) return;
+
+  const stored = await chrome.storage.local.get(STORAGE_KEYS.dismissedUpdateVersion);
+  if (stored[STORAGE_KEYS.dismissedUpdateVersion] === result.latestVersion) return;
+
+  availableUpdate = {
+    latestVersion: result.latestVersion,
+    releaseUrl: "https://github.com/paulchi-intel/key-chatter/releases/latest"
+  };
+  renderUpdateBanner();
+}
+
+async function dismissExtensionUpdate() {
+  if (!availableUpdate?.latestVersion) return;
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.dismissedUpdateVersion]: availableUpdate.latestVersion
+  });
+  availableUpdate = null;
+  renderUpdateBanner();
+}
+
+const MIN_COMPOSER_RATIO = 0.15;
+const MAX_COMPOSER_RATIO = 0.65;
+const COMPOSER_RATIO_STEP = 0.05;
+
+function normalizeComposerRatio(value) {
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio)) return null;
+  return Math.min(MAX_COMPOSER_RATIO, Math.max(MIN_COMPOSER_RATIO, ratio));
+}
+
+function getLayoutSplitHeight(config) {
+  const upperRect = config.upper.getBoundingClientRect();
+  const lowerRect = config.lower.getBoundingClientRect();
+  return Math.max(0, lowerRect.bottom - upperRect.top);
+}
+
+function getCurrentComposerRatio(config) {
+  const totalHeight = getLayoutSplitHeight(config);
+  if (!totalHeight) return normalizeComposerRatio(state[config.stateKey]) || config.defaultRatio;
+  return normalizeComposerRatio(config.lower.getBoundingClientRect().height / totalHeight) || config.defaultRatio;
+}
+
+function applyComposerRatio(config, value, persist = false) {
+  const ratio = normalizeComposerRatio(value);
+  if (ratio == null) return;
+  const totalHeight = getLayoutSplitHeight(config);
+  if (totalHeight > 0) config.lower.style.flexBasis = `${Math.round(totalHeight * ratio)}px`;
+  state[config.stateKey] = ratio;
+  const percent = Math.round(ratio * 100);
+  config.handle.setAttribute("aria-valuenow", String(percent));
+  config.handle.setAttribute("aria-valuetext", `${percent}%`);
+  if (persist) {
+    chrome.storage.local.set({ [config.storageKey]: ratio }).catch(() => {});
+  }
+}
+
+function setupLayoutResizer(config) {
+  if (!config.handle || !config.upper || !config.lower) return;
+  let dragging = false;
+  let pendingClientY = null;
+  let frameId = 0;
+
+  const ratioFromClientY = (clientY) => {
+    const upperRect = config.upper.getBoundingClientRect();
+    const lowerRect = config.lower.getBoundingClientRect();
+    const totalHeight = Math.max(1, lowerRect.bottom - upperRect.top);
+    return normalizeComposerRatio((lowerRect.bottom - clientY) / totalHeight);
+  };
+
+  const flushPointerUpdate = () => {
+    frameId = 0;
+    if (pendingClientY == null) return;
+    const ratio = ratioFromClientY(pendingClientY);
+    pendingClientY = null;
+    applyComposerRatio(config, ratio);
+  };
+
+  const queuePointerUpdate = (clientY) => {
+    pendingClientY = clientY;
+    if (!frameId) frameId = requestAnimationFrame(flushPointerUpdate);
+  };
+
+  const finishDragging = (event) => {
+    if (!dragging) return;
+    if (event?.clientY != null) pendingClientY = event.clientY;
+    if (frameId) cancelAnimationFrame(frameId);
+    flushPointerUpdate();
+    dragging = false;
+    config.handle.classList.remove("active");
+    document.body.classList.remove("resizing-layout");
+    applyComposerRatio(config, state[config.stateKey] || getCurrentComposerRatio(config), true);
+    if (event?.pointerId != null && config.handle.hasPointerCapture?.(event.pointerId)) {
+      config.handle.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  config.handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !event.isPrimary || dragging) return;
+    event.preventDefault();
+    dragging = true;
+    config.handle.classList.add("active");
+    document.body.classList.add("resizing-layout");
+    config.handle.setPointerCapture(event.pointerId);
+    queuePointerUpdate(event.clientY);
+  });
+  config.handle.addEventListener("pointermove", (event) => {
+    if (dragging) queuePointerUpdate(event.clientY);
+  });
+  config.handle.addEventListener("pointerup", finishDragging);
+  config.handle.addEventListener("pointercancel", finishDragging);
+  config.handle.addEventListener("lostpointercapture", finishDragging);
+  window.addEventListener("blur", finishDragging);
+
+  config.handle.addEventListener("keydown", (event) => {
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const current = normalizeComposerRatio(state[config.stateKey]) || getCurrentComposerRatio(config);
+    const step = event.shiftKey ? COMPOSER_RATIO_STEP * 2 : COMPOSER_RATIO_STEP;
+    const next = event.key === "Home"
+      ? MIN_COMPOSER_RATIO
+      : event.key === "End"
+        ? MAX_COMPOSER_RATIO
+        : current + (event.key === "ArrowUp" ? step : -step);
+    applyComposerRatio(config, next, true);
+  });
+
+  const savedRatio = normalizeComposerRatio(state[config.stateKey]);
+  requestAnimationFrame(() => {
+    applyComposerRatio(config, savedRatio || getCurrentComposerRatio(config));
+  });
+
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(() => {
+      const ratio = normalizeComposerRatio(state[config.stateKey]);
+      if (ratio != null && !dragging) applyComposerRatio(config, ratio);
+    });
+    observer.observe(config.container);
+  }
+}
+
+function setupLayoutResizers() {
+  setupLayoutResizer({
+    container: UI.chatContainer,
+    upper: UI.messagesContainer,
+    lower: UI.inputContainer,
+    handle: UI.chatLayoutResizer,
+    stateKey: "chatComposerRatio",
+    storageKey: STORAGE_KEYS.chatComposerRatio,
+    defaultRatio: 0.24
   });
 }
 
@@ -1077,6 +1295,7 @@ async function saveState() {
     [STORAGE_KEYS.savedPrompts]: state.savedPrompts,
     [STORAGE_KEYS.panelMode]: state.panelMode,
     [STORAGE_KEYS.verifiedModels]: state.verifiedModels,
+    [STORAGE_KEYS.chatComposerRatio]: state.chatComposerRatio,
     kc_tabs: tabs,
     kc_active_tab_id: state.activeTabId,
     kc_next_tab_id: state.nextTabId,
@@ -1093,6 +1312,7 @@ async function initializeState() {
     STORAGE_KEYS.savedPrompts,
     STORAGE_KEYS.panelMode,
     STORAGE_KEYS.verifiedModels,
+    STORAGE_KEYS.chatComposerRatio,
     "kc_tabs",
     "kc_active_tab_id",
     "kc_next_tab_id",
@@ -1117,6 +1337,7 @@ async function initializeState() {
   state.currentLanguage = stored[STORAGE_KEYS.language] || "zh-TW";
   state.savedPrompts = Array.isArray(stored[STORAGE_KEYS.savedPrompts]) ? stored[STORAGE_KEYS.savedPrompts] : [];
   state.panelMode = stored[STORAGE_KEYS.panelMode] || "sidepanel";
+  state.chatComposerRatio = normalizeComposerRatio(stored[STORAGE_KEYS.chatComposerRatio]);
   // URL param is ground truth: no srcWindowId means we're in the sidepanel, not a popup.
   if (POPUP_SRC_WINDOW_ID === null) {
     state.panelMode = "sidepanel";
@@ -1239,10 +1460,114 @@ function getTabLabel(tab) {
   return t("empty-tab-label");
 }
 
+function createScrollableTabBar(bar, onAdd) {
+  bar.replaceChildren();
+
+  const previous = document.createElement("button");
+  previous.className = "tab-scroll-btn tab-scroll-prev";
+  previous.type = "button";
+  previous.textContent = "\u2039";
+  previous.title = t("tab-scroll-left");
+  previous.setAttribute("aria-label", t("tab-scroll-left"));
+
+  const viewport = document.createElement("div");
+  viewport.className = "tab-scroll-viewport";
+  viewport.tabIndex = 0;
+
+  const strip = document.createElement("div");
+  strip.className = "tab-strip";
+  strip.setAttribute("role", "tablist");
+  viewport.appendChild(strip);
+
+  const next = document.createElement("button");
+  next.className = "tab-scroll-btn tab-scroll-next";
+  next.type = "button";
+  next.textContent = "\u203a";
+  next.title = t("tab-scroll-right");
+  next.setAttribute("aria-label", t("tab-scroll-right"));
+
+  const add = document.createElement("button");
+  add.className = "tab-add";
+  add.type = "button";
+  add.textContent = "+";
+  add.title = t("new-tab");
+  add.setAttribute("aria-label", t("new-tab"));
+  add.addEventListener("click", onAdd);
+
+  const updateControls = () => {
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const hasOverflow = maxScroll > 1;
+    previous.classList.toggle("no-overflow", !hasOverflow);
+    next.classList.toggle("no-overflow", !hasOverflow);
+    previous.disabled = !hasOverflow || viewport.scrollLeft <= 1;
+    next.disabled = !hasOverflow || viewport.scrollLeft >= maxScroll - 1;
+  };
+
+  const scrollByPage = (direction) => {
+    const distance = Math.max(120, Math.round(viewport.clientWidth * 0.72));
+    viewport.scrollBy({ left: direction * distance, behavior: "smooth" });
+  };
+
+  previous.addEventListener("click", () => scrollByPage(-1));
+  next.addEventListener("click", () => scrollByPage(1));
+  viewport.addEventListener("scroll", updateControls, { passive: true });
+  viewport.addEventListener("wheel", (event) => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX) || viewport.scrollWidth <= viewport.clientWidth) return;
+    event.preventDefault();
+    viewport.scrollLeft += event.deltaY;
+  }, { passive: false });
+  viewport.addEventListener("keydown", (event) => {
+    if (event.target !== viewport || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") viewport.scrollTo({ left: 0, behavior: "smooth" });
+    else if (event.key === "End") viewport.scrollTo({ left: viewport.scrollWidth, behavior: "smooth" });
+    else scrollByPage(event.key === "ArrowLeft" ? -1 : 1);
+  });
+
+  if (typeof ResizeObserver === "function") {
+    const resizeObserver = new ResizeObserver(() => {
+      if (!viewport.isConnected) {
+        resizeObserver.disconnect();
+        return;
+      }
+      updateControls();
+    });
+    resizeObserver.observe(viewport);
+  }
+
+  bar.append(previous, viewport, next, add);
+
+  const finish = () => {
+    updateControls();
+    requestAnimationFrame(() => {
+      const active = strip.querySelector(".tab-item.active");
+      if (active) {
+        const left = active.offsetLeft;
+        const right = left + active.offsetWidth;
+        let targetScroll = viewport.scrollLeft;
+        if (left < viewport.scrollLeft) targetScroll = left;
+        else if (right > viewport.scrollLeft + viewport.clientWidth) {
+          targetScroll = right - viewport.clientWidth;
+        }
+        if (targetScroll !== viewport.scrollLeft) {
+          const previousBehavior = viewport.style.scrollBehavior;
+          viewport.style.scrollBehavior = "auto";
+          viewport.scrollLeft = targetScroll;
+          requestAnimationFrame(() => { viewport.style.scrollBehavior = previousBehavior; });
+        }
+      }
+      updateControls();
+    });
+  };
+
+  return { strip, finish };
+}
+
 function renderTabBar() {
   const bar = document.getElementById("tabBar");
   if (!bar) return;
-  bar.innerHTML = "";
+  const tabBar = createScrollableTabBar(bar, addTab);
+  const strip = tabBar.strip;
 
   let dragSrcId = null;
 
@@ -1280,7 +1605,7 @@ function renderTabBar() {
     });
     btn.addEventListener("dragend", () => {
       btn.classList.remove("dragging");
-      bar.querySelectorAll(".tab-item").forEach(b => b.classList.remove("drag-over"));
+      strip.querySelectorAll(".tab-item").forEach(b => b.classList.remove("drag-over"));
     });
     btn.addEventListener("dragover", e => {
       e.preventDefault();
@@ -1302,15 +1627,9 @@ function renderTabBar() {
       saveState();
     });
 
-    bar.appendChild(btn);
+    strip.appendChild(btn);
   });
-
-  const addBtn = document.createElement("button");
-  addBtn.className = "tab-add";
-  addBtn.textContent = "+";
-  addBtn.title = "New tab";
-  addBtn.addEventListener("click", addTab);
-  bar.appendChild(addBtn);
+  tabBar.finish();
 }
 
 // Inline-rename a tab: swap the label for a text input, commit on Enter/blur,
@@ -2358,6 +2677,7 @@ function setupEventHandlers() {
   });
 
   UI.budgetText.addEventListener("click", () => refreshBudget());
+  UI.updateDismissBtn.addEventListener("click", dismissExtensionUpdate);
   UI.panelModeBtn.addEventListener("click", togglePanelMode);
   UI.saveSessionBtn.addEventListener("click", downloadSession);
   UI.loadPageBtn.addEventListener("click", loadPageContent);
@@ -2444,11 +2764,6 @@ function setupEventHandlers() {
     }
   });
 
-  UI.messageInput.addEventListener("input", () => {
-    UI.messageInput.style.height = "auto";
-    UI.messageInput.style.height = `${UI.messageInput.scrollHeight}px`;
-  });
-
   UI.closeModelDiscoveryModal.addEventListener("click", closeModelDiscoveryModal);
   UI.modelDiscoveryModal.addEventListener("click", (event) => {
     if (event.target === UI.modelDiscoveryModal) closeModelDiscoveryModal();
@@ -2471,8 +2786,11 @@ function setupEventHandlers() {
 }
 
 async function bootstrap() {
+  renderInstalledVersion();
   await initializeState();
   setupEventHandlers();
+  setupLayoutResizers();
+  checkForExtensionUpdate().catch(() => {});
 
   if (!state.selectedApiKey) {
     await promptForApiKey(true);

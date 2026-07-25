@@ -36,6 +36,20 @@ No default key is bundled. On first launch you will be prompted to enter your AP
 
 To change the key later, click **🔑 Key Chatter** in the header.
 
+## Install and update
+
+Download the latest package from [GitHub Releases](https://github.com/paulchi-intel/key-chatter/releases/latest), extract the ZIP, then load the extracted folder from `chrome://extensions` using **Load unpacked**.
+
+Key Chatter displays its installed version in the header and checks the latest public GitHub Release at startup. Checks are cached for six hours. When a newer version is available, the extension shows a localized update banner with a **Download latest** button. Dismissing the banner skips only that release version.
+
+To update an unpacked installation, download and extract the latest `key-chatter-v*.zip`, replace the existing extension files in the same folder, then click **Reload** in `chrome://extensions`. Conversations and settings remain in Chrome storage.
+
+## Publish a release
+
+1. Update `version` in `manifest.json` and commit the change.
+2. Create and push a matching tag, for example `v1.1.0`.
+3. The GitHub Actions release workflow verifies that the tag matches the manifest, validates JavaScript, packages the extension ZIP, generates a SHA-256 checksum, and creates the GitHub Release.
+
 ## How to use
 
 1. Open the side panel (click the extension icon).
@@ -104,7 +118,8 @@ To change the key later, click **🔑 Key Chatter** in the header.
 ## Files
 
 - `manifest.json`: extension manifest (MV3); permissions include `sidePanel`, `windows`, `activeTab`, `scripting`, `storage`, `clipboardRead`, `downloads`
-- `background.js`: service worker — API bridge; routes requests to ExpertGPT or GNAI endpoints; handles `SET_PANEL_MODE` (creates popup window or opens sidepanel); caches `_cachedMode` and `_cachedSrcWindowId` for gesture-safe `sidePanel.open()` calls
-- `sidepanel.html`: UI structure and CSS for both sidepanel and popup modes; layout order: header-bar → status-bar → tab-bar → chat-container
-- `sidepanel.js`: all UI logic — multi-tab management (`addTab`, `switchTab`, `closeTab`, `renderTabBar`, `commitActiveTab`), chat, markdown rendering (`renderMarkdown`), API key modal/validation, model list rendering (with/without quota), quick questions, saved prompts, panel-mode toggle, save session (`buildSessionMarkdown`, `downloadSession`), unsaved-session guard (`showConfirmSaveDialog`), i18n
+- `background.js`: service worker — API bridge; routes requests to ExpertGPT or GNAI endpoints; checks GitHub Releases with a six-hour cache; handles `SET_PANEL_MODE` (creates popup window or opens sidepanel); caches `_cachedMode` and `_cachedSrcWindowId` for gesture-safe `sidePanel.open()` calls
+- `sidepanel.html`: UI structure and CSS for both sidepanel and popup modes; includes the installed-version label and update banner
+- `sidepanel.js`: all UI logic — multi-tab management (`addTab`, `switchTab`, `closeTab`, `renderTabBar`, `commitActiveTab`), release update banner, chat, markdown rendering (`renderMarkdown`), API key modal/validation, model list rendering (with/without quota), quick questions, saved prompts, panel-mode toggle, save session (`buildSessionMarkdown`, `downloadSession`), unsaved-session guard (`showConfirmSaveDialog`), i18n
 - `options.html`: static info page
+- `.github/workflows/release.yml`: validates and publishes ZIP/checksum assets for matching `v*.*.*` tags

@@ -1,0 +1,54 @@
+name: Release extension
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify version and JavaScript
+        shell: bash
+        run: |
+          manifest_version="$(node -p "require('./manifest.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [[ "$manifest_version" != "$tag_version" ]]; then
+            echo "manifest.json version ($manifest_version) does not match tag ($GITHUB_REF_NAME)."
+            exit 1
+          fi
+          node --check background.js
+          node --check sidepanel.js
+
+      - name: Package extension
+        shell: bash
+        run: |
+          archive="key-chatter-${GITHUB_REF_NAME}.zip"
+          zip -r "$archive" \
+            manifest.json \
+            background.js \
+            options.html \
+            sidepanel.html \
+            sidepanel.js \
+            LICENSE \
+            README.md
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          archive="key-chatter-${GITHUB_REF_NAME}.zip"
+          gh release create "$GITHUB_REF_NAME" \
+            "$archive" \
+            "$archive.sha256" \
+            --title "Key Chatter ${GITHUB_REF_NAME}" \
+            --generate-notes

@@ -8,6 +8,9 @@ const GNAI_ANTHROPIC_BASE_URL = "https://gnai.intel.com/api/providers/anthropic"
 const GNAI_USER_API_URL = "https://gnai.intel.com/api/user";
 const REQUEST_TIMEOUT_MS = 30000;
 const GNAI_MODELS_DOC_URL = "https://gpusw-docs.intel.com/services/gnai/models/";
+const GITHUB_RELEASES_URL = "https://github.com/paulchi-intel/key-chatter/releases/latest";
+const UPDATE_CHECK_CACHE_KEY = "keyChatterUpdateCheck";
+const UPDATE_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
 
 const GNAI_OPENAI_MODELS = ["gpt-4o", "gpt-4.1", "gpt-5-mini", "gpt-5-nano", "o3-mini"];
 const GNAI_ANTHROPIC_MODELS = ["claude-4-6-opus", "claude-4-6-sonnet", "claude-4-5-opus", "claude-4-5-sonnet", "claude-4-5-haiku"];
@@ -27,9 +30,76 @@ const MESSAGE_TYPES = {
   CHAT: "CHAT",
   GET_QUOTA: "GET_QUOTA",
   SET_PANEL_MODE: "SET_PANEL_MODE",
+  CHECK_EXTENSION_UPDATE: "CHECK_EXTENSION_UPDATE",
   GET_BUDGET: "GET_BUDGET",
   VERIFY_MODELS: "VERIFY_MODELS"
 };
+
+function normalizeReleaseVersion(value) {
+  const version = String(value || "").trim().replace(/^v/i, "");
+  return /^\d+(?:\.\d+){0,3}$/.test(version) ? version : null;
+}
+
+function compareExtensionVersions(left, right) {
+  const leftParts = String(left || "").split(".").map(Number);
+  const rightParts = String(right || "").split(".").map(Number);
+  const length = Math.max(leftParts.length, rightParts.length, 4);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function formatUpdateCheckResult(release) {
+  const currentVersion = chrome.runtime.getManifest().version;
+  const latestVersion = normalizeReleaseVersion(release?.latestVersion);
+  return {
+    currentVersion,
+    latestVersion,
+    updateAvailable: Boolean(latestVersion && compareExtensionVersions(latestVersion, currentVersion) > 0),
+    releaseUrl: release?.releaseUrl || GITHUB_RELEASES_URL,
+    publishedAt: release?.publishedAt || null
+  };
+}
+
+async function checkExtensionUpdate(force = false) {
+  const now = Date.now();
+  const stored = await chrome.storage.local.get(UPDATE_CHECK_CACHE_KEY);
+  const cached = stored[UPDATE_CHECK_CACHE_KEY];
+  if (!force && cached && now - Number(cached.checkedAt || 0) < UPDATE_CHECK_CACHE_MS) {
+    return formatUpdateCheckResult(cached);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(GITHUB_RELEASES_URL, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub release request failed (${response.status})`);
+    }
+
+    const releaseUrl = response.url || GITHUB_RELEASES_URL;
+    const tagMatch = releaseUrl.match(/\/releases\/tag\/v?(\d+(?:\.\d+){0,3})(?:[/?#]|$)/i);
+    const release = {
+      checkedAt: now,
+      latestVersion: normalizeReleaseVersion(tagMatch?.[1]),
+      releaseUrl: tagMatch ? releaseUrl : GITHUB_RELEASES_URL,
+      publishedAt: null
+    };
+    await chrome.storage.local.set({ [UPDATE_CHECK_CACHE_KEY]: release });
+    return formatUpdateCheckResult(release);
+  } catch (error) {
+    if (cached) return formatUpdateCheckResult(cached);
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 const SYSTEM_PROMPTS = {
   "zh-TW": "你是一位友善且樂於助人的 AI 助理。請使用繁體中文回答，內容清楚、精準、可執行。",
@@ -921,6 +991,18 @@ async function fetchPersonalQuota(apiKey) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === MESSAGE_TYPES.CHECK_EXTENSION_UPDATE) {
+    (async () => {
+      try {
+        const result = await checkExtensionUpdate(Boolean(message.force));
+        sendResponse({ ok: true, ...result });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message || String(err) });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === MESSAGE_TYPES.DISCOVER_MODELS) {
     (async () => {
       try {
