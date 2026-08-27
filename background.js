@@ -7,7 +7,7 @@ const GNAI_OPENAI_BASE_URL = "https://gnai.intel.com/api/providers/openai/v1";
 const GNAI_ANTHROPIC_BASE_URL = "https://gnai.intel.com/api/providers/anthropic";
 const GNAI_USER_API_URL = "https://gnai.intel.com/api/user";
 const REQUEST_TIMEOUT_MS = 30000;
-const GNAI_MODELS_DOC_URL = "https://gpusw-docs.intel.com/services/gnai/models/";
+const GNAI_MODELS_DOC_URL = "https://gnai.intel.com/meta?section=models";
 const GITHUB_RELEASES_URL = "https://github.com/paulchi-intel/key-chatter/releases/latest";
 const UPDATE_CHECK_CACHE_KEY = "keyChatterUpdateCheck";
 const UPDATE_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
@@ -815,11 +815,13 @@ function parseModelsFromDocumentation(html) {
   throw new Error("The GNAI documentation does not contain a table with a usable Model column");
 }
 
-async function discoverModelsFromDocumentation() {
+async function discoverModelsFromDocumentation(apiKey) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let documentationError = null;
   try {
     const response = await fetch(GNAI_MODELS_DOC_URL, {
+      credentials: "include",
       headers: { Accept: "text/html" },
       signal: controller.signal
     });
@@ -835,12 +837,29 @@ async function discoverModelsFromDocumentation() {
     };
   } catch (error) {
     if (error?.name === "AbortError") {
-      throw new Error(`Model documentation request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+      documentationError = new Error(`Model page request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+    } else {
+      documentationError = error;
     }
-    throw error;
   } finally {
     clearTimeout(timeoutId);
   }
+
+  // The GNAI meta page is rendered by the authenticated web app and may not
+  // expose its model list in the response HTML. Use the authenticated provider
+  // model endpoints as a DOM-independent fallback before probing availability.
+  if (isGnaiKey(apiKey)) {
+    const [openaiModels, anthropicModels] = await Promise.all([
+      fetchModels(apiKey),
+      fetchAnthropicModels(apiKey)
+    ]);
+    const models = [...new Set([...openaiModels, ...anthropicModels])];
+    if (models.length > 0) {
+      return { models, openaiModels, anthropicModels, sourceUrl: "GNAI model APIs" };
+    }
+  }
+
+  throw documentationError || new Error("Unable to discover GNAI models");
 }
 
 // Fetch without throwing on non-2xx, so we can inspect the status code.
@@ -1006,7 +1025,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MESSAGE_TYPES.DISCOVER_MODELS) {
     (async () => {
       try {
-        const result = await discoverModelsFromDocumentation();
+        const result = await discoverModelsFromDocumentation(message.apiKey);
         sendResponse({ ok: true, ...result });
       } catch (err) {
         sendResponse({ ok: false, error: err.message || String(err) });

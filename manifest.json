@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Key Chatter",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "ExpertGPT side panel chat with single API key, model selection, quick prompts, and multilingual UI.",
   "permissions": [
     "activeTab",

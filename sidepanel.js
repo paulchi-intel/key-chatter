@@ -2374,7 +2374,10 @@ async function verifyAndLoadModels() {
   modelDiscoveryState.error = "";
   setStatus("loading", t("status-fetching-model-docs"));
 
-  const discovery = await sendRuntimeMessage({ type: "DISCOVER_MODELS" }, 60000);
+  const discovery = await sendRuntimeMessage({
+    type: "DISCOVER_MODELS",
+    apiKey: state.selectedApiKey
+  }, 60000);
   if (!discovery?.ok) {
     const error = discovery?.error || "unknown error";
     modelDiscoveryState.phase = "error";
